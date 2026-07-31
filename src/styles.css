@@ -1,0 +1,98 @@
+@import "tailwindcss";
+@import "tw-animate-css";
+
+@theme {
+  --color-bg: #faf7ff;
+  --color-surface: #ffffff;
+  --color-fg: #1a0b2e;
+  --color-muted: #7c6a96;
+  --color-primary: #a743ff;
+  --color-primary-dark: #8a2be2;
+  --color-primary-light: #c77dff;
+  --color-primary-soft: #f3e8ff;
+  --color-border: #e8dff5;
+  --color-sidebar: #1a0b2e;
+  --color-sidebar-2: #2d1b4e;
+  --color-purple-50: #faf7ff;
+  --color-purple-100: #f3e8ff;
+  --color-purple-200: #e8dff5;
+  --color-purple-300: #d4b8f5;
+  --color-purple-400: #c77dff;
+  --color-purple-500: #a743ff;
+  --color-purple-600: #8a2be2;
+  --color-purple-700: #6b21a8;
+  --color-purple-800: #2d1b4e;
+  --color-purple-900: #1a0b2e;
+  --radius: 0.75rem;
+  --font-sans: "Inter", -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto,
+    sans-serif;
+}
+
+@layer base {
+  * {
+    border-color: var(--color-border);
+  }
+  html,
+  body,
+  #app {
+    min-height: 100%;
+  }
+  body {
+    margin: 0;
+    font-family: var(--font-sans);
+    background: var(--color-bg);
+    color: var(--color-fg);
+    -webkit-font-smoothing: antialiased;
+    -webkit-tap-highlight-color: transparent;
+  }
+  button:not(:disabled),
+  [role="button"]:not(:disabled) {
+    cursor: pointer;
+  }
+  input,
+  select,
+  textarea {
+    font-family: inherit;
+  }
+}
+
+/* Scrollbar — purple tint */
+::-webkit-scrollbar {
+  width: 8px;
+  height: 8px;
+}
+::-webkit-scrollbar-thumb {
+  background: var(--color-purple-300);
+  border-radius: 4px;
+}
+::-webkit-scrollbar-track {
+  background: transparent;
+}
+
+@keyframes fade-in {
+  from {
+    opacity: 0;
+    transform: translateY(8px);
+  }
+  to {
+    opacity: 1;
+    transform: translateY(0);
+  }
+}
+.animate-fade-in {
+  animation: fade-in 0.3s ease-out;
+}
+
+@keyframes slide-in {
+  from {
+    opacity: 0;
+    transform: translateX(24px);
+  }
+  to {
+    opacity: 1;
+    transform: translateX(0);
+  }
+}
+.animate-slide-in {
+  animation: slide-in 0.25s ease-out;
+}

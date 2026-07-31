@@ -1,0 +1,2731 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
+    <title>Zynlo</title>
+    <script src="https://cdn.jsdelivr.net/npm/chart.js"></script>
+    <style>
+        * { margin: 0; padding: 0; box-sizing: border-box; -webkit-tap-highlight-color: transparent; }
+        :root {
+            --primary: #a743ff;
+            --primary-dark: #8a2be2;
+            --primary-light: #c77dff;
+            --success: #10b981;
+            --warning: #f59e0b;
+            --danger: #ef4444;
+            --bg: #f8f5ff;
+            --card: #ffffff;
+            --text: #1a0b2e;
+            --text-light: #7c6a96;
+            --border: #e8dff5;
+        }
+        body {
+            font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif;
+            background: var(--bg);
+            color: var(--text);
+            min-height: 100vh;
+            -webkit-font-smoothing: antialiased;
+        }
+        .app { display: flex; min-height: 100vh; }
+        .sidebar {
+            width: 260px;
+            background: linear-gradient(180deg, #1a0b2e 0%, #2d1b4e 100%);
+            padding: 24px 16px;
+            position: fixed;
+            height: 100vh;
+            overflow-y: auto;
+            z-index: 100;
+            transition: transform 0.3s ease;
+            -webkit-overflow-scrolling: touch;
+        }
+        .logo {
+            font-size: 22px; font-weight: 700; color: #fff;
+            margin-bottom: 32px; display: flex;
+            align-items: center; gap: 10px; padding: 0 8px;
+        }
+        .logo-icon {
+            width: 36px; height: 36px;
+            background: var(--primary); border-radius: 10px;
+            display: flex; align-items: center; justify-content: center;
+            color: white; font-size: 18px;
+            box-shadow: 0 0 15px rgba(167,67,255,0.4);
+            flex-shrink: 0;
+        }
+        .nav-item {
+            display: flex; align-items: center; gap: 12px;
+            padding: 12px 16px; border-radius: 10px;
+            cursor: pointer; margin-bottom: 4px;
+            color: rgba(255,255,255,0.6); font-weight: 500;
+            transition: all 0.2s;
+            font-size: 14px;
+        }
+        .nav-item:hover {
+            background: rgba(167,67,255,0.15); color: #fff;
+        }
+        .nav-item.active {
+            background: var(--primary); color: #fff;
+            box-shadow: 0 4px 15px rgba(167,67,255,0.3);
+        }
+        .main {
+            flex: 1; margin-left: 260px; padding: 24px 32px;
+            transition: margin-left 0.3s ease;
+            min-width: 0;
+        }
+        .header {
+            display: flex; justify-content: space-between;
+            align-items: center; margin-bottom: 28px;
+            flex-wrap: wrap; gap: 12px;
+        }
+        .header h1 { font-size: 28px; font-weight: 700; line-height: 1.2; }
+        .header-actions {
+            display: flex; gap: 8px;
+            flex-wrap: wrap;
+        }
+        .btn {
+            padding: 10px 20px; border-radius: 10px;
+            border: none; font-weight: 600; cursor: pointer;
+            font-size: 14px; display: inline-flex;
+            align-items: center; gap: 8px;
+            transition: all 0.2s;
+            white-space: nowrap;
+            touch-action: manipulation;
+        }
+        .btn-primary {
+            background: var(--primary); color: white;
+            box-shadow: 0 4px 15px rgba(167,67,255,0.25);
+        }
+        .btn-primary:hover {
+            background: var(--primary-dark);
+            transform: translateY(-1px);
+            box-shadow: 0 6px 20px rgba(167,67,255,0.35);
+        }
+        .btn-primary:active { transform: translateY(0); }
+        .btn-secondary {
+            background: white; border: 1px solid var(--border);
+            color: var(--text);
+        }
+        .btn-secondary:hover { border-color: var(--primary); color: var(--primary); }
+        .btn-sm { padding: 6px 12px; font-size: 13px; }
+        .btn:disabled { opacity: 0.5; cursor: not-allowed; }
+        .kpi-grid {
+            display: grid;
+            grid-template-columns: repeat(auto-fit, minmax(200px, 1fr));
+            gap: 16px; margin-bottom: 28px;
+        }
+        .kpi-card {
+            background: var(--card); border-radius: 16px;
+            padding: 20px; border: 1px solid var(--border);
+            box-shadow: 0 2px 8px rgba(167,67,255,0.06);
+            transition: transform 0.2s, box-shadow 0.2s;
+        }
+        .kpi-card:hover {
+            transform: translateY(-2px);
+            box-shadow: 0 8px 25px rgba(167,67,255,0.1);
+        }
+        .kpi-label {
+            font-size: 12px; color: var(--text-light);
+            text-transform: uppercase; letter-spacing: 0.5px;
+            font-weight: 600; margin-bottom: 8px;
+        }
+        .kpi-value { font-size: 28px; font-weight: 700; margin-bottom: 8px; }
+        .kpi-change { font-size: 13px; font-weight: 600; }
+        .kpi-change.up { color: var(--success); }
+        .kpi-change.down { color: var(--danger); }
+        .kpi-icon {
+            width: 40px; height: 40px; border-radius: 12px;
+            display: flex; align-items: center; justify-content: center;
+            font-size: 18px; margin-bottom: 12px;
+        }
+        .kpi-icon.blue { background: #f3e8ff; color: var(--primary); }
+        .kpi-icon.green { background: #d1fae5; color: var(--success); }
+        .kpi-icon.amber { background: #fef3c7; color: var(--warning); }
+        .kpi-icon.purple { background: linear-gradient(135deg, #a743ff, #c77dff); color: white; }
+        .card {
+            background: var(--card); border-radius: 16px;
+            border: 1px solid var(--border);
+            box-shadow: 0 2px 8px rgba(167,67,255,0.06);
+            margin-bottom: 24px; overflow: hidden;
+        }
+        .card-header {
+            padding: 20px 24px; border-bottom: 1px solid var(--border);
+            display: flex; justify-content: space-between; align-items: center;
+            flex-wrap: wrap; gap: 12px;
+        }
+        .card-title { font-size: 16px; font-weight: 700; }
+        .card-body { padding: 20px 24px; }
+        .chart-grid {
+            display: grid;
+            grid-template-columns: repeat(auto-fit, minmax(350px, 1fr));
+            gap: 24px; margin-bottom: 24px;
+        }
+        .chart-container { position: relative; height: 280px; }
+        .table-wrap { overflow-x: auto; -webkit-overflow-scrolling: touch; }
+        table { width: 100%; border-collapse: collapse; font-size: 14px; }
+        th {
+            text-align: left; padding: 12px 16px;
+            font-weight: 600; color: var(--text-light);
+            text-transform: uppercase; font-size: 11px;
+            letter-spacing: 0.5px;
+            border-bottom: 1px solid var(--border);
+            white-space: nowrap; background: #faf7ff;
+            position: sticky; top: 0;
+        }
+        td { padding: 14px 16px; border-bottom: 1px solid var(--border); vertical-align: middle; }
+        tr:hover td { background: #faf7ff; }
+        .badge {
+            padding: 4px 10px; border-radius: 20px;
+            font-size: 12px; font-weight: 600; display: inline-block;
+        }
+        .badge-success { background: #d1fae5; color: #065f46; }
+        .badge-warning { background: #fef3c7; color: #92400e; }
+        .badge-danger { background: #fee2e2; color: #991b1b; }
+        .badge-info { background: #f3e8ff; color: #6b21a8; }
+        .badge-secondary { background: #f1f5f9; color: #475569; }
+        .agent-avatar {
+            width: 32px; height: 32px; border-radius: 50%;
+            background: linear-gradient(135deg, var(--primary), var(--primary-light));
+            color: white; display: inline-flex;
+            align-items: center; justify-content: center;
+            font-weight: 600; font-size: 12px;
+            margin-right: 8px;
+            box-shadow: 0 2px 8px rgba(167,67,255,0.2);
+            flex-shrink: 0;
+        }
+        .form-grid {
+            display: grid;
+            grid-template-columns: repeat(auto-fit, minmax(250px, 1fr));
+            gap: 16px;
+        }
+        .form-group {
+            display: flex; flex-direction: column; gap: 6px;
+        }
+        .form-group label {
+            font-size: 13px; font-weight: 600; color: var(--text-light);
+        }
+        .form-group input, .form-group select, .form-group textarea {
+            padding: 10px 14px; border: 1px solid var(--border);
+            border-radius: 10px; font-size: 14px;
+            font-family: inherit; background: white; color: var(--text);
+            -webkit-appearance: none;
+            appearance: none;
+        }
+        .form-group input:focus, .form-group select:focus, .form-group textarea:focus {
+            outline: none; border-color: var(--primary);
+            box-shadow: 0 0 0 3px rgba(167,67,255,0.12);
+        }
+        .form-group textarea { resize: vertical; min-height: 80px; }
+        .modal-overlay {
+            position: fixed; top: 0; left: 0; right: 0; bottom: 0;
+            background: rgba(26,11,46,0.6);
+            display: none; align-items: center; justify-content: center;
+            z-index: 1000; padding: 20px; backdrop-filter: blur(4px);
+            -webkit-overflow-scrolling: touch;
+        }
+        .modal-overlay.active { display: flex; }
+        .modal {
+            background: white; border-radius: 20px;
+            width: 100%; max-width: 600px;
+            max-height: 90vh; overflow-y: auto;
+            box-shadow: 0 25px 80px rgba(26,11,46,0.3);
+            -webkit-overflow-scrolling: touch;
+        }
+        .modal-header {
+            padding: 24px 24px 0;
+            display: flex; justify-content: space-between; align-items: center;
+        }
+        .modal-header h2 { font-size: 20px; color: var(--text); }
+        .modal-close {
+            background: none; border: none; font-size: 24px;
+            cursor: pointer; color: var(--text-light);
+            width: 32px; height: 32px;
+            display: flex; align-items: center; justify-content: center;
+            border-radius: 10px; transition: all 0.2s;
+        }
+        .modal-close:hover { background: var(--bg); color: var(--primary); }
+        .modal-body { padding: 20px 24px; }
+        .modal-footer {
+            padding: 16px 24px 24px;
+            display: flex; justify-content: flex-end; gap: 10px;
+            border-top: 1px solid var(--border);
+            flex-wrap: wrap;
+        }
+        .tabs {
+            display: flex; gap: 4px;
+            border-bottom: 1px solid var(--border);
+            margin-bottom: 20px;
+            overflow-x: auto;
+            -webkit-overflow-scrolling: touch;
+        }
+        .tab {
+            padding: 10px 20px; cursor: pointer;
+            font-weight: 600; font-size: 14px;
+            color: var(--text-light);
+            border-bottom: 2px solid transparent;
+            margin-bottom: -1px; transition: all 0.2s;
+            white-space: nowrap;
+            flex-shrink: 0;
+        }
+        .tab:hover { color: var(--primary); }
+        .tab.active { color: var(--primary); border-bottom-color: var(--primary); }
+        .tab-content { display: none; }
+        .tab-content.active { display: block; }
+        .toolbar {
+            display: flex; gap: 12px;
+            margin-bottom: 16px; flex-wrap: wrap;
+        }
+        .search-box {
+            position: relative; flex: 1;
+            min-width: 200px; max-width: 320px;
+        }
+        .search-box input {
+            width: 100%; padding: 10px 14px 10px 38px;
+            border: 1px solid var(--border); border-radius: 10px;
+            font-size: 14px; color: var(--text);
+        }
+        .search-box input:focus {
+            outline: none; border-color: var(--primary);
+            box-shadow: 0 0 0 3px rgba(167,67,255,0.12);
+        }
+        .search-box::before {
+            content: "🔍"; position: absolute;
+            left: 12px; top: 50%; transform: translateY(-50%);
+            font-size: 14px; opacity: 0.5;
+        }
+        .section { display: none; }
+        .section.active { display: block; }
+        .empty-state {
+            text-align: center; padding: 60px 20px;
+            color: var(--text-light);
+        }
+        .empty-state-icon { font-size: 48px; margin-bottom: 16px; opacity: 0.3; }
+        .stars { color: var(--warning); letter-spacing: 2px; }
+
+        .card-list { display: none; }
+        .card-list-item {
+            background: var(--card);
+            border: 1px solid var(--border);
+            border-radius: 12px;
+            padding: 16px;
+            margin-bottom: 12px;
+            box-shadow: 0 1px 3px rgba(0,0,0,0.04);
+        }
+        .card-list-item .row {
+            display: flex; justify-content: space-between;
+            align-items: center; margin-bottom: 8px;
+        }
+        .card-list-item .row:last-child { margin-bottom: 0; }
+        .card-list-item .label {
+            font-size: 12px; color: var(--text-light);
+            text-transform: uppercase; letter-spacing: 0.5px;
+            font-weight: 600;
+        }
+        .card-list-item .value {
+            font-size: 14px; font-weight: 500;
+        }
+        .card-list-item .title {
+            font-size: 16px; font-weight: 700;
+            margin-bottom: 4px;
+        }
+        .card-list-item .subtitle {
+            font-size: 13px; color: var(--text-light);
+            margin-bottom: 12px;
+        }
+        .card-list-item .actions {
+            display: flex; gap: 8px;
+            justify-content: flex-end;
+            padding-top: 12px;
+            border-top: 1px solid var(--border);
+            margin-top: 8px;
+        }
+
+        @keyframes fadeIn {
+            from { opacity: 0; transform: translateY(10px); }
+            to { opacity: 1; transform: translateY(0); }
+        }
+        .fade-in { animation: fadeIn 0.3s ease-out; }
+        .progress-bar {
+            height: 6px; background: var(--border);
+            border-radius: 3px; overflow: hidden; margin-top: 6px;
+        }
+        .progress-fill {
+            height: 100%; border-radius: 3px;
+            transition: width 0.5s ease;
+        }
+        .progress-fill.green { background: var(--success); }
+        .progress-fill.amber { background: var(--warning); }
+        .progress-fill.red { background: var(--danger); }
+        .action-btns { display: flex; gap: 6px; }
+        .btn-icon {
+            width: 28px; height: 28px; border-radius: 8px;
+            border: none; cursor: pointer;
+            display: inline-flex; align-items: center; justify-content: center;
+            font-size: 14px; background: transparent; transition: all 0.2s;
+            touch-action: manipulation;
+        }
+        .btn-icon:hover { background: var(--bg); }
+        .btn-icon.edit { color: var(--primary); }
+        .btn-icon.delete { color: var(--danger); }
+        .mobile-menu-btn {
+            display: none; position: fixed;
+            top: 16px; left: 16px; z-index: 200;
+            background: var(--primary); color: white;
+            border: none; width: 40px; height: 40px;
+            border-radius: 10px; font-size: 20px;
+            cursor: pointer;
+            box-shadow: 0 4px 15px rgba(167,67,255,0.3);
+            touch-action: manipulation;
+        }
+        .cloud-panel {
+            margin-top: 20px; padding: 16px;
+            background: rgba(167,67,255,0.08);
+            border-radius: 12px;
+            border: 1px dashed rgba(167,67,255,0.2);
+        }
+        .cloud-panel h4 { font-size: 14px; margin-bottom: 10px; color: white; }
+        .cloud-panel p {
+            font-size: 12px; color: rgba(255,255,255,0.6);
+            margin-bottom: 10px; line-height: 1.4;
+        }
+        .cloud-status {
+            font-size: 12px; margin-bottom: 8px;
+            font-weight: 600; display: flex;
+            align-items: center; gap: 6px;
+        }
+        .cloud-status .dot {
+            width: 8px; height: 8px; border-radius: 50%;
+            display: inline-block;
+        }
+        .cloud-status.online .dot { background: #10b981; }
+        .cloud-status.offline .dot { background: #ef4444; }
+        .cloud-status.syncing .dot { background: #f59e0b; animation: pulse 1s infinite; }
+        @keyframes pulse { 0%,100%{opacity:1} 50%{opacity:0.3} }
+        .cloud-input {
+            width: 100%; padding: 8px 10px;
+            border-radius: 8px;
+            border: 1px solid rgba(255,255,255,0.2);
+            background: rgba(255,255,255,0.1);
+            color: white; font-size: 12px;
+            margin-bottom: 8px;
+        }
+        .cloud-input::placeholder { color: rgba(255,255,255,0.4); }
+        .cloud-btn-group {
+            display: flex; gap: 8px; flex-wrap: wrap;
+        }
+        .cloud-btn-group .btn {
+            background: rgba(255,255,255,0.1);
+            border-color: rgba(255,255,255,0.2);
+            color: white; font-size: 12px;
+            padding: 6px 12px;
+        }
+        .cloud-btn-group .btn:hover {
+            background: rgba(255,255,255,0.2);
+            border-color: white;
+        }
+        .sync-indicator {
+            position: fixed; bottom: 20px; right: 20px;
+            background: var(--card); padding: 12px 16px;
+            border-radius: 12px; border: 1px solid var(--border);
+            box-shadow: 0 4px 20px rgba(0,0,0,0.1);
+            display: none; align-items: center; gap: 10px;
+            z-index: 999;
+            font-size: 13px;
+        }
+        .sync-indicator.show { display: flex; }
+        .sync-indicator.syncing { border-color: var(--warning); }
+        .sync-indicator.error { border-color: var(--danger); }
+        .sync-indicator.success { border-color: var(--success); }
+        .setup-modal-body { max-height: 60vh; overflow-y: auto; }
+        .setup-step {
+            background: var(--bg); border-radius: 10px;
+            padding: 14px; margin-bottom: 12px;
+            border: 1px solid var(--border);
+        }
+        .setup-step h4 { font-size: 14px; margin-bottom: 6px; color: var(--primary); }
+        .setup-step p { font-size: 13px; color: var(--text-light); line-height: 1.5; }
+        .setup-step code {
+            background: #1a0b2e; color: #c77dff;
+            padding: 2px 6px; border-radius: 4px;
+            font-family: monospace; font-size: 12px;
+        }
+
+        .toast-container {
+            position: fixed;
+            top: 20px; right: 20px;
+            z-index: 1001;
+            display: flex;
+            flex-direction: column;
+            gap: 8px;
+            max-width: calc(100vw - 40px);
+        }
+        .toast {
+            background: var(--card);
+            border: 1px solid var(--border);
+            border-radius: 12px;
+            padding: 14px 18px;
+            box-shadow: 0 8px 30px rgba(0,0,0,0.12);
+            display: flex;
+            align-items: center;
+            gap: 10px;
+            font-size: 14px;
+            font-weight: 500;
+            min-width: 280px;
+            max-width: 400px;
+            animation: slideIn 0.3s ease;
+            transform-origin: top right;
+        }
+        .toast.success { border-left: 4px solid var(--success); }
+        .toast.error { border-left: 4px solid var(--danger); }
+        .toast.warning { border-left: 4px solid var(--warning); }
+        .toast.info { border-left: 4px solid var(--primary); }
+        @keyframes slideIn {
+            from { opacity: 0; transform: translateX(40px) scale(0.95); }
+            to { opacity: 1; transform: translateX(0) scale(1); }
+        }
+        @keyframes slideOut {
+            from { opacity: 1; transform: translateX(0) scale(1); }
+            to { opacity: 0; transform: translateX(40px) scale(0.95); }
+        }
+        .toast.removing { animation: slideOut 0.3s ease forwards; }
+
+        .confirm-modal .modal { max-width: 420px; }
+        .confirm-modal .modal-body { text-align: center; padding: 28px 24px; }
+        .confirm-modal .modal-body .icon {
+            font-size: 48px; margin-bottom: 12px;
+        }
+        .confirm-modal .modal-body h3 {
+            font-size: 18px; margin-bottom: 8px;
+        }
+        .confirm-modal .modal-body p {
+            color: var(--text-light); font-size: 14px;
+        }
+        .confirm-modal .modal-footer {
+            justify-content: center;
+            gap: 12px;
+        }
+
+        @media (max-width: 768px) {
+            .sidebar { transform: translateX(-100%); }
+            .sidebar.open { transform: translateX(0); }
+            .main { margin-left: 0; padding: 16px; padding-top: 64px; }
+            .mobile-menu-btn { display: block; }
+            .kpi-grid { grid-template-columns: repeat(2, 1fr); gap: 10px; }
+            .kpi-card { padding: 14px; }
+            .kpi-value { font-size: 22px; }
+            .kpi-icon { width: 32px; height: 32px; font-size: 14px; }
+            .chart-grid { grid-template-columns: 1fr; }
+            .chart-container { height: 220px; }
+            .header h1 { font-size: 22px; }
+            .header-actions { width: 100%; }
+            .header-actions .btn { flex: 1; justify-content: center; }
+            .toolbar { flex-direction: column; }
+            .search-box { max-width: none; }
+            .modal { margin: 10px; max-height: calc(100vh - 20px); }
+            .modal-header h2 { font-size: 18px; }
+            .form-grid { grid-template-columns: 1fr; }
+            .tabs { padding-bottom: 4px; }
+            .table-wrap { display: none; }
+            .card-list { display: block; }
+            .toast-container {
+                left: 16px; right: 16px;
+                top: auto; bottom: 20px;
+            }
+            .toast {
+                min-width: auto;
+                max-width: none;
+            }
+            .client-detail-header { flex-wrap: wrap; gap: 8px; }
+            .client-kpi-row { grid-template-columns: repeat(2, 1fr); }
+        }
+
+        @media (max-width: 480px) {
+            .kpi-grid { grid-template-columns: 1fr; }
+            .header { flex-direction: column; align-items: flex-start; }
+            .header-actions .btn { width: 100%; }
+            .client-kpi-row { grid-template-columns: 1fr; }
+        }
+
+        .highlight { background: rgba(167,67,255,0.15); border-radius: 2px; padding: 0 2px; }
+
+        /* Client detail card styles */
+        .client-detail-card {
+            background: var(--card);
+            border: 1px solid var(--border);
+            border-radius: 16px;
+            margin-bottom: 24px;
+            overflow: hidden;
+            box-shadow: 0 2px 8px rgba(167,67,255,0.06);
+        }
+        .client-detail-header {
+            padding: 20px 24px;
+            border-bottom: 1px solid var(--border);
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+            background: #faf7ff;
+            cursor: pointer;
+            transition: background 0.2s;
+            gap: 12px;
+        }
+        .client-detail-header:hover {
+            background: #f3e8ff;
+        }
+        .client-detail-header .client-name {
+            font-size: 18px;
+            font-weight: 700;
+            display: flex;
+            align-items: center;
+            gap: 10px;
+            flex-wrap: wrap;
+        }
+        .client-detail-header .client-meta {
+            font-size: 13px;
+            color: var(--text-light);
+            margin-top: 4px;
+        }
+        .client-detail-header .toggle-icon {
+            font-size: 18px;
+            transition: transform 0.2s;
+            color: var(--primary);
+            flex-shrink: 0;
+        }
+        .client-detail-card.open .toggle-icon {
+            transform: rotate(180deg);
+        }
+        .client-detail-body {
+            max-height: 0;
+            overflow: hidden;
+            transition: max-height 0.3s ease, padding 0.3s ease;
+            padding: 0 24px;
+        }
+        .client-detail-card.open .client-detail-body {
+            max-height: 9999px;
+            padding: 20px 24px;
+        }
+        .client-kpi-row {
+            display: grid;
+            grid-template-columns: repeat(auto-fit, minmax(140px, 1fr));
+            gap: 12px;
+            margin-bottom: 20px;
+        }
+        .client-kpi {
+            background: var(--bg);
+            border-radius: 12px;
+            padding: 14px;
+            text-align: center;
+        }
+        .client-kpi .label {
+            font-size: 11px;
+            text-transform: uppercase;
+            letter-spacing: 0.5px;
+            color: var(--text-light);
+            font-weight: 600;
+            margin-bottom: 6px;
+        }
+        .client-kpi .value {
+            font-size: 20px;
+            font-weight: 700;
+            color: var(--text);
+        }
+
+        /* Export modal styles */
+        .export-options {
+            display: grid;
+            gap: 12px;
+        }
+        .export-option {
+            display: flex;
+            align-items: center;
+            gap: 12px;
+            padding: 14px;
+            border: 2px solid var(--border);
+            border-radius: 12px;
+            cursor: pointer;
+            transition: all 0.2s;
+            touch-action: manipulation;
+        }
+        .export-option:hover {
+            border-color: var(--primary);
+            background: var(--bg);
+        }
+        .export-option .icon {
+            font-size: 24px;
+            flex-shrink: 0;
+        }
+        .export-option .info h4 {
+            font-size: 14px;
+            margin-bottom: 2px;
+        }
+        .export-option .info p {
+            font-size: 12px;
+            color: var(--text-light);
+        }
+
+        /* Mobile client list styles */
+        .client-card-mobile {
+            background: var(--card);
+            border: 1px solid var(--border);
+            border-radius: 12px;
+            padding: 16px;
+            margin-bottom: 12px;
+        }
+        .client-card-mobile .title {
+            font-size: 16px;
+            font-weight: 700;
+            margin-bottom: 4px;
+        }
+        .client-card-mobile .subtitle {
+            font-size: 13px;
+            color: var(--text-light);
+            margin-bottom: 12px;
+        }
+        .client-card-mobile .stats-row {
+            display: grid;
+            grid-template-columns: repeat(2, 1fr);
+            gap: 8px;
+            margin-bottom: 12px;
+        }
+        .client-card-mobile .stat {
+            background: var(--bg);
+            border-radius: 8px;
+            padding: 10px;
+            text-align: center;
+        }
+        .client-card-mobile .stat .label {
+            font-size: 10px;
+            text-transform: uppercase;
+            color: var(--text-light);
+            font-weight: 600;
+        }
+        .client-card-mobile .stat .value {
+            font-size: 18px;
+            font-weight: 700;
+        }
+        .client-card-mobile .contacts-list {
+            margin-top: 12px;
+            padding-top: 12px;
+            border-top: 1px solid var(--border);
+        }
+        .client-card-mobile .contact-item {
+            padding: 8px 0;
+            font-size: 14px;
+            border-bottom: 1px solid var(--border);
+        }
+        .client-card-mobile .contact-item:last-child {
+            border-bottom: none;
+        }
+    </style>
+</head>
+<body>
+    <button class="mobile-menu-btn" onclick="toggleSidebar()">☰</button>
+    <div class="toast-container" id="toast-container"></div>
+    <div class="app">
+        <aside class="sidebar" id="sidebar">
+            <div class="logo">
+                <div class="logo-icon">📞</div>
+                Zynlo
+            </div>
+            <nav>
+                <div class="nav-item active" onclick="showSection('dashboard', this)">
+                    <span class="nav-icon">📊</span> Dashboard
+                </div>
+                <div class="nav-item" onclick="showSection('calls', this)">
+                    <span class="nav-icon">📋</span> Call Log
+                </div>
+                <div class="nav-item" onclick="showSection('agents', this)">
+                    <span class="nav-icon">👥</span> Agents
+                </div>
+                <div class="nav-item" onclick="showSection('customers', this)">
+                    <span class="nav-icon">🤝</span> Customers
+                </div>
+                <div class="nav-item" onclick="showSection('analytics', this)">
+                    <span class="nav-icon">📈</span> Analytics
+                </div>
+                <div class="nav-item" onclick="showSection('clients', this)">
+                    <span class="nav-icon">🏢</span> Clients
+                </div>
+            </nav>
+            <div class="cloud-panel">
+                <h4>☁️ Firebase Sync</h4>
+                <p>Real-time cloud sync. Free forever on Firebase Spark plan.</p>
+                <div class="cloud-status offline" id="cloud-status">
+                    <span class="dot"></span>
+                    <span id="cloud-status-text">Not connected</span>
+                </div>
+                <input type="text" class="cloud-input" id="firebase-url"
+                    placeholder="Paste Firebase DB URL"
+                    value="">
+                <div class="cloud-btn-group">
+                    <button class="btn btn-sm" onclick="showSetupGuide()">📖 Setup Guide</button>
+                    <button class="btn btn-sm" onclick="connectFirebase()">🔗 Connect</button>
+                </div>
+                <button class="btn btn-sm" style="margin-top:8px;width:100%"
+                    onclick="loadDemoData()">🎲 Load Demo Data</button>
+            </div>
+        </aside>
+
+        <main class="main">
+            <div id="dashboard" class="section active">
+                <div class="header">
+                    <h1>Dashboard</h1>
+                    <div class="header-actions">
+                        <button class="btn btn-secondary" onclick="openExportModal()">📤 Export</button>
+                        <button class="btn btn-primary" onclick="openModal('call')">+ Log Call</button>
+                    </div>
+                </div>
+                <div class="kpi-grid">
+                    <div class="kpi-card fade-in">
+                        <div class="kpi-icon blue">📞</div>
+                        <div class="kpi-label">Total Calls Today</div>
+                        <div class="kpi-value" id="kpi-total-calls">0</div>
+                        <div class="kpi-change up" id="kpi-calls-change">+0 vs yesterday</div>
+                    </div>
+                    <div class="kpi-card fade-in">
+                        <div class="kpi-icon green">✅</div>
+                        <div class="kpi-label">Resolution Rate</div>
+                        <div class="kpi-value" id="kpi-resolution">0%</div>
+                        <div class="progress-bar"><div class="progress-fill green" id="kpi-resolution-bar" style="width:0%"></div></div>
+                    </div>
+                    <div class="kpi-card fade-in">
+                        <div class="kpi-icon amber">⏱️</div>
+                        <div class="kpi-label">Avg Handle Time</div>
+                        <div class="kpi-value" id="kpi-aht">0m</div>
+                        <div class="kpi-change" id="kpi-aht-change">Target: &lt;5m</div>
+                    </div>
+                    <div class="kpi-card fade-in">
+                        <div class="kpi-icon purple">⭐</div>
+                        <div class="kpi-label">Quality Assurance</div>
+                        <div class="kpi-value" id="kpi-csat">0.0</div>
+                        <div class="kpi-change up" id="kpi-csat-change">/ 5.0</div>
+                    </div>
+                </div>
+                <div class="chart-grid">
+                    <div class="card">
+                        <div class="card-header"><div class="card-title">Calls by Hour</div></div>
+                        <div class="card-body"><div class="chart-container"><canvas id="callsByHourChart"></canvas></div></div>
+                    </div>
+                    <div class="card">
+                        <div class="card-header"><div class="card-title">Call Outcomes</div></div>
+                        <div class="card-body"><div class="chart-container"><canvas id="outcomeChart"></canvas></div></div>
+                    </div>
+                </div>
+                <div class="card">
+                    <div class="card-header">
+                        <div class="card-title">Recent Calls</div>
+                        <button class="btn btn-sm btn-secondary" onclick="showSection('calls', document.querySelectorAll('.nav-item')[1])">View All</button>
+                    </div>
+                    <div class="card-body">
+                        <div class="table-wrap">
+                            <table>
+                                <thead><tr><th>Time</th><th>Agent</th><th>Customer</th><th>Duration</th><th>Outcome</th><th>QA Rating</th><th>Notes</th></tr></thead>
+                                <tbody id="recent-calls-table"></tbody>
+                            </table>
+                        </div>
+                        <div class="card-list" id="recent-calls-cards"></div>
+                    </div>
+                </div>
+            </div>
+
+            <div id="calls" class="section">
+                <div class="header">
+                    <h1>Call Log</h1>
+                    <div class="header-actions">
+                        <button class="btn btn-secondary" onclick="openExportModal()">📤 Export</button>
+                        <button class="btn btn-primary" onclick="openModal('call')">+ Log Call</button>
+                    </div>
+                </div>
+                <div class="toolbar">
+                    <div class="search-box">
+                        <input type="text" id="call-search" placeholder="Search calls..." onkeyup="renderCalls()">
+                    </div>
+                    <select id="call-filter-status" onchange="renderCalls()" style="padding:10px 14px;border:1px solid var(--border);border-radius:10px;color:var(--text);background:white;">
+                        <option value="">All Outcomes</option>
+                        <option value="Resolved">Resolved</option>
+                        <option value="Escalated">Escalated</option>
+                        <option value="Follow-up">Follow-up</option>
+                        <option value="No Answer">No Answer</option>
+                        <option value="Voicemail">Voicemail</option>
+                    </select>
+                    <select id="call-filter-agent" onchange="renderCalls()" style="padding:10px 14px;border:1px solid var(--border);border-radius:10px;color:var(--text);background:white;">
+                        <option value="">All Agents</option>
+                    </select>
+                </div>
+                <div class="card">
+                    <div class="card-body" style="padding:0">
+                        <div class="table-wrap">
+                            <table>
+                                <thead><tr><th>Date & Time</th><th>Agent</th><th>Customer</th><th>Type</th><th>Duration</th><th>Outcome</th><th>QA Rating</th><th>Actions</th></tr></thead>
+                                <tbody id="calls-table"></tbody>
+                            </table>
+                        </div>
+                        <div class="card-list" id="calls-cards"></div>
+                        <div id="calls-empty" class="empty-state" style="display:none">
+                            <div class="empty-state-icon">📋</div>
+                            <h3>No calls logged yet</h3>
+                            <p>Start by logging your first call using the button above.</p>
+                        </div>
+                    </div>
+                </div>
+            </div>
+
+            <div id="agents" class="section">
+                <div class="header">
+                    <h1>Agents</h1>
+                    <div class="header-actions">
+                        <button class="btn btn-secondary" onclick="openExportModal()">📤 Export</button>
+                        <button class="btn btn-primary" onclick="openModal('agent')">+ Add Agent</button>
+                    </div>
+                </div>
+                <div class="card">
+                    <div class="card-body" style="padding:0">
+                        <div class="table-wrap">
+                            <table>
+                                <thead><tr><th>Agent</th><th>Role</th><th>Calls</th><th>Avg Handle Time</th><th>Resolution Rate</th><th>QA Score</th><th>Status</th><th>Actions</th></tr></thead>
+                                <tbody id="agents-table"></tbody>
+                            </table>
+                        </div>
+                        <div class="card-list" id="agents-cards"></div>
+                        <div id="agents-empty" class="empty-state" style="display:none">
+                            <div class="empty-state-icon">👥</div>
+                            <h3>No agents added yet</h3>
+                            <p>Add your team members to start tracking performance.</p>
+                        </div>
+                    </div>
+                </div>
+            </div>
+
+            <div id="customers" class="section">
+                <div class="header">
+                    <h1>Customers</h1>
+                    <div class="header-actions">
+                        <button class="btn btn-secondary" onclick="openExportModal()">📤 Export</button>
+                        <button class="btn btn-primary" onclick="openModal('customer')">+ Add Customer</button>
+                    </div>
+                </div>
+                <div class="toolbar">
+                    <div class="search-box">
+                        <input type="text" id="customer-search" placeholder="Search customers..." onkeyup="renderCustomers()">
+                    </div>
+                </div>
+                <div class="card">
+                    <div class="card-body" style="padding:0">
+                        <div class="table-wrap">
+                            <table>
+                                <thead><tr><th>Name</th><th>Phone</th><th>Email</th><th>Company</th><th>Total Calls</th><th>Last Contact</th><th>Notes</th><th>Actions</th></tr></thead>
+                                <tbody id="customers-table"></tbody>
+                            </table>
+                        </div>
+                        <div class="card-list" id="customers-cards"></div>
+                        <div id="customers-empty" class="empty-state" style="display:none">
+                            <div class="empty-state-icon">🤝</div>
+                            <h3>No customers added yet</h3>
+                            <p>Add customers to track their interaction history.</p>
+                        </div>
+                    </div>
+                </div>
+            </div>
+
+            <div id="analytics" class="section">
+                <div class="header">
+                    <h1>Analytics</h1>
+                    <div class="header-actions">
+                        <button class="btn btn-secondary" onclick="openExportModal()">📤 Export</button>
+                    </div>
+                </div>
+                <div class="tabs">
+                    <div class="tab active" onclick="showTab('performance-tab', this)">Performance</div>
+                    <div class="tab" onclick="showTab('trends-tab', this)">Trends</div>
+                    <div class="tab" onclick="showTab('agent-rank-tab', this)">Agent Rankings</div>
+                </div>
+                <div id="performance-tab" class="tab-content active">
+                    <div class="chart-grid">
+                        <div class="card">
+                            <div class="card-header"><div class="card-title">Daily Call Volume (Last 7 Days)</div></div>
+                            <div class="card-body"><div class="chart-container"><canvas id="dailyVolumeChart"></canvas></div></div>
+                        </div>
+                        <div class="card">
+                            <div class="card-header"><div class="card-title">Outcome Breakdown</div></div>
+                            <div class="card-body"><div class="chart-container"><canvas id="outcomePieChart"></canvas></div></div>
+                        </div>
+                    </div>
+                </div>
+                <div id="trends-tab" class="tab-content">
+                    <div class="card">
+                        <div class="card-header"><div class="card-title">Average Handle Time Trend</div></div>
+                        <div class="card-body"><div class="chart-container"><canvas id="ahtTrendChart"></canvas></div></div>
+                    </div>
+                </div>
+                <div id="agent-rank-tab" class="tab-content">
+                    <div class="card">
+                        <div class="card-header"><div class="card-title">Top Performing Agents</div></div>
+                        <div class="card-body">
+                            <div class="table-wrap">
+                                <table>
+                                    <thead><tr><th>Rank</th><th>Agent</th><th>Calls</th><th>Resolution %</th><th>Avg Handle Time</th><th>QA Score</th><th>Score</th></tr></thead>
+                                    <tbody id="agent-rank-table"></tbody>
+                                </table>
+                            </div>
+                            <div class="card-list" id="agent-rank-cards"></div>
+                        </div>
+                    </div>
+                </div>
+            </div>
+
+            <!-- Clients Section -->
+            <div id="clients" class="section">
+                <div class="header">
+                    <h1>Clients</h1>
+                    <div class="header-actions">
+                        <button class="btn btn-secondary" onclick="openExportModal()">📤 Export</button>
+                        <button class="btn btn-primary" onclick="openModal('client')">+ Add Client</button>
+                    </div>
+                </div>
+                <div class="toolbar">
+                    <div class="search-box">
+                        <input type="text" id="client-search" placeholder="Search clients..." onkeyup="renderClients()">
+                    </div>
+                    <select id="client-sort" onchange="renderClients()" style="padding:10px 14px;border:1px solid var(--border);border-radius:10px;color:var(--text);background:white;">
+                        <option value="calls-desc">Most Calls</option>
+                        <option value="calls-asc">Least Calls</option>
+                        <option value="name-asc">Name A-Z</option>
+                        <option value="name-desc">Name Z-A</option>
+                        <option value="last-contact">Last Contact</option>
+                    </select>
+                </div>
+                <div id="clients-list"></div>
+                <div id="clients-empty" class="empty-state" style="display:none">
+                    <div class="empty-state-icon">🏢</div>
+                    <h3>No clients yet</h3>
+                    <p>Add clients using the + Add Client button above to start tracking them.</p>
+                </div>
+            </div>
+        </main>
+    </div>
+
+    <div class="sync-indicator" id="sync-indicator">
+        <span id="sync-icon">🔄</span>
+        <span id="sync-text">Syncing...</span>
+    </div>
+
+    <div class="modal-overlay" id="modal-setup">
+        <div class="modal">
+            <div class="modal-header">
+                <h2>Firebase Setup Guide</h2>
+                <button class="modal-close" onclick="closeModal('setup')">×</button>
+            </div>
+            <div class="modal-body setup-modal-body">
+                <div class="setup-step">
+                    <h4>Step 1: Create a Firebase Project</h4>
+                    <p>Go to <a href="https://console.firebase.google.com" target="_blank">console.firebase.google.com</a> and click "Create a project". Name it anything (e.g. "zynlo-crm"). You don't need Google Analytics.</p>
+                </div>
+                <div class="setup-step">
+                    <h4>Step 2: Create a Realtime Database</h4>
+                    <p>In the left sidebar, click "Build" → "Realtime Database". Click "Create Database". Choose a location close to you. Start in <strong>test mode</strong> (this allows read/write without auth).</p>
+                </div>
+                <div class="setup-step">
+                    <h4>Step 3: Copy Your Database URL</h4>
+                    <p>Once created, you'll see a URL like:<br><code>https://zynlo-crm-default-rtdb.firebaseio.com/</code><br>Copy this entire URL and paste it into the "Firebase DB URL" field in the sidebar, then click Connect.</p>
+                </div>
+                <div class="setup-step">
+                    <h4>Step 4: Share With Your Team</h4>
+                    <p>Anyone with the URL can view and edit the data. The URL is saved in your browser's address bar, so bookmark it or share the link directly.</p>
+                </div>
+                <div class="setup-step">
+                    <h4>Free Tier Limits (Spark Plan)</h4>
+                    <p>✅ 1 GB storage<br>✅ 100 simultaneous connections<br>✅ 10 GB download/month<br>✅ No credit card required<br>✅ No API key needed (test mode)</p>
+                </div>
+            </div>
+            <div class="modal-footer">
+                <button class="btn btn-primary" onclick="closeModal('setup')">Got it</button>
+            </div>
+        </div>
+    </div>
+
+    <div class="modal-overlay confirm-modal" id="modal-confirm">
+        <div class="modal">
+            <div class="modal-body">
+                <div class="icon" id="confirm-icon">⚠️</div>
+                <h3 id="confirm-title">Are you sure?</h3>
+                <p id="confirm-message">This action cannot be undone.</p>
+            </div>
+            <div class="modal-footer">
+                <button class="btn btn-secondary" onclick="closeConfirmModal()">Cancel</button>
+                <button class="btn btn-danger" id="confirm-btn" onclick="executeConfirm()" style="background:var(--danger);color:white;">Delete</button>
+            </div>
+        </div>
+    </div>
+
+    <!-- Export Modal -->
+    <div class="modal-overlay" id="modal-export">
+        <div class="modal">
+            <div class="modal-header">
+                <h2>Export Data</h2>
+                <button class="modal-close" onclick="closeModal('export')">×</button>
+            </div>
+            <div class="modal-body">
+                <div class="export-options" id="export-options-main">
+                    <div class="export-option" onclick="exportData('csv','calls')">
+                        <span class="icon">📋</span>
+                        <div class="info">
+                            <h4>Calls (CSV)</h4>
+                            <p>Export all call records as a spreadsheet</p>
+                        </div>
+                    </div>
+                    <div class="export-option" onclick="exportData('csv','agents')">
+                        <span class="icon">👥</span>
+                        <div class="info">
+                            <h4>Agents (CSV)</h4>
+                            <p>Export agent list with performance stats</p>
+                        </div>
+                    </div>
+                    <div class="export-option" onclick="exportData('csv','customers')">
+                        <span class="icon">🤝</span>
+                        <div class="info">
+                            <h4>Customers (CSV)</h4>
+                            <p>Export customer list with call counts</p>
+                        </div>
+                    </div>
+                    <div class="export-option" onclick="showClientExportStep()">
+                        <span class="icon">🏢</span>
+                        <div class="info">
+                            <h4>Clients by Company (CSV)</h4>
+                            <p>Export calls grouped by client/company — select which client</p>
+                        </div>
+                    </div>
+                    <div class="export-option" onclick="exportData('json','all')">
+                        <span class="icon">📦</span>
+                        <div class="info">
+                            <h4>Full Backup (JSON)</h4>
+                            <p>Export everything as a single JSON file</p>
+                        </div>
+                    </div>
+                </div>
+                <div id="export-client-step" style="display:none;">
+                    <div style="margin-bottom:16px;">
+                        <button class="btn btn-sm btn-secondary" onclick="backToExportMain()">← Back</button>
+                    </div>
+                    <div class="form-group">
+                        <label>Select Client</label>
+                        <select id="export-client-select" style="width:100%;padding:10px 14px;border:1px solid var(--border);border-radius:10px;font-size:14px;color:var(--text);background:white;">
+                            <option value="">All Clients</option>
+                        </select>
+                    </div>
+                    <div style="margin-top:16px;">
+                        <button class="btn btn-primary" onclick="exportClientData()" style="width:100%;">Export Selected Client</button>
+                    </div>
+                </div>
+            </div>
+            <div class="modal-footer">
+                <button class="btn btn-secondary" onclick="closeModal('export')">Cancel</button>
+            </div>
+        </div>
+    </div>
+
+    <div class="modal-overlay" id="modal-call">
+        <div class="modal">
+            <div class="modal-header">
+                <h2 id="call-modal-title">Log New Call</h2>
+                <button class="modal-close" onclick="closeModal('call')">×</button>
+            </div>
+            <div class="modal-body">
+                <div id="call-modal-warning" style="display:none;background:#fef3c7;border:1px solid #f59e0b;border-radius:10px;padding:12px 16px;margin-bottom:16px;color:#92400e;font-size:13px;"></div>
+                <form id="call-form" onsubmit="saveCall(event)">
+                    <input type="hidden" id="call-id">
+                    <div class="form-grid">
+                        <div class="form-group">
+                            <label>Date & Time *</label>
+                            <input type="datetime-local" id="call-datetime" required>
+                        </div>
+                        <div class="form-group">
+                            <label>Agent *</label>
+                            <select id="call-agent" required></select>
+                        </div>
+                        <div class="form-group">
+                            <label>Customer *</label>
+                            <select id="call-customer" required></select>
+                        </div>
+                        <div class="form-group">
+                            <label>Client *</label>
+                            <select id="call-client" required></select>
+                        </div>
+                        <div class="form-group">
+                            <label>Call Type</label>
+                            <select id="call-type"><option>Inbound</option><option>Outbound</option><option>Callback</option></select>
+                        </div>
+                        <div class="form-group">
+                            <label>Duration (minutes) *</label>
+                            <input type="number" id="call-duration" min="0" step="0.1" required>
+                        </div>
+                        <div class="form-group">
+                            <label>Outcome *</label>
+                            <select id="call-outcome" required>
+                                <option value="Resolved">Resolved</option>
+                                <option value="Escalated">Escalated</option>
+                                <option value="Follow-up">Follow-up Required</option>
+                                <option value="No Answer">No Answer</option>
+                                <option value="Voicemail">Left Voicemail</option>
+                            </select>
+                        </div>
+                        <div class="form-group">
+                            <label>Quality Assurance Rating (1-5)</label>
+                            <input type="number" id="call-rating" min="1" max="5" step="1">
+                        </div>
+                    </div>
+                    <div class="form-group" style="margin-top:16px">
+                        <label>Notes</label>
+                        <textarea id="call-notes" placeholder="Call summary, action items, etc."></textarea>
+                    </div>
+                    <div class="modal-footer">
+                        <button type="button" class="btn btn-secondary" onclick="closeModal('call')">Cancel</button>
+                        <button type="submit" class="btn btn-primary">Save Call</button>
+                    </div>
+                </form>
+            </div>
+        </div>
+    </div>
+
+    <div class="modal-overlay" id="modal-agent">
+        <div class="modal">
+            <div class="modal-header">
+                <h2 id="agent-modal-title">Add Agent</h2>
+                <button class="modal-close" onclick="closeModal('agent')">×</button>
+            </div>
+            <div class="modal-body">
+                <form id="agent-form" onsubmit="saveAgent(event)">
+                    <input type="hidden" id="agent-id">
+                    <div class="form-grid">
+                        <div class="form-group"><label>Full Name *</label><input type="text" id="agent-name" required></div>
+                        <div class="form-group"><label>Email</label><input type="email" id="agent-email"></div>
+                        <div class="form-group">
+                            <label>Role</label>
+                            <select id="agent-role"><option>Agent</option><option>Senior Agent</option><option>Team Lead</option><option>Supervisor</option></select>
+                        </div>
+                        <div class="form-group">
+                            <label>Status</label>
+                            <select id="agent-status"><option value="Active">Active</option><option value="Away">Away</option><option value="Offline">Offline</option><option value="On Break">On Break</option></select>
+                        </div>
+                    </div>
+                    <div class="modal-footer">
+                        <button type="button" class="btn btn-secondary" onclick="closeModal('agent')">Cancel</button>
+                        <button type="submit" class="btn btn-primary">Save Agent</button>
+                    </div>
+                </form>
+            </div>
+        </div>
+    </div>
+
+    <div class="modal-overlay" id="modal-customer">
+        <div class="modal">
+            <div class="modal-header">
+                <h2 id="customer-modal-title">Add Customer</h2>
+                <button class="modal-close" onclick="closeModal('customer')">×</button>
+            </div>
+            <div class="modal-body">
+                <form id="customer-form" onsubmit="saveCustomer(event)">
+                    <input type="hidden" id="customer-id">
+                    <div class="form-grid">
+                        <div class="form-group"><label>Name *</label><input type="text" id="customer-name" required></div>
+                        <div class="form-group"><label>Phone *</label><input type="tel" id="customer-phone" required></div>
+                        <div class="form-group"><label>Email</label><input type="email" id="customer-email"></div>
+                        <div class="form-group"><label>Company</label><input type="text" id="customer-company"></div>
+                    </div>
+                    
+                    <div class="modal-footer">
+                        <button type="button" class="btn btn-secondary" onclick="closeModal('customer')">Cancel</button>
+                        <button type="submit" class="btn btn-primary">Save Customer</button>
+                    </div>
+                </form>
+            </div>
+        </div>
+    </div>
+<script>
+
+// ==================== CONFIG ====================
+var CONFIG = {
+    POLL_INTERVAL: 0,
+    DEBOUNCE_MS: 150,
+    MAX_RECENT_CALLS: 10,
+    CHART_COLORS: ['#10b981', '#ef4444', '#f59e0b', '#94a3b8', '#3b82f6', '#8b5cf6'],
+    OUTCOME_BADGES: {
+        'Resolved': 'badge-success',
+        'Escalated': 'badge-danger',
+        'Follow-up': 'badge-warning',
+        'No Answer': 'badge-secondary',
+        'Voicemail': 'badge-info'
+    },
+    STATUS_BADGES: {
+        'Active': 'badge-success',
+        'Away': 'badge-warning',
+        'Offline': 'badge-secondary',
+        'On Break': 'badge-info'
+    }
+};
+
+// ==================== STATE & CACHE ====================
+var STATE = {
+    data: { agents: [], customers: [], calls: [], clients: [] },
+    connected: false,
+    baseUrl: '',
+    _pollTimer: null,
+    _statsCache: {},
+    _lastHash: '',
+    _pendingConfirm: null
+};
+
+var charts = {};
+
+// ==================== FIREBASE LAYER ====================
+var DB = {
+    url: function(path) {
+        return STATE.baseUrl + '/' + (path || '') + '.json';
+    },
+
+    get: async function(path) {
+        var res = await fetch(this.url(path));
+        if (!res.ok) throw new Error('GET ' + path + ': ' + res.status);
+        return await res.json();
+    },
+
+    put: async function(path, value) {
+        var res = await fetch(this.url(path), {
+            method: 'PUT',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify(value)
+        });
+        if (!res.ok) throw new Error('PUT ' + path + ': ' + res.status);
+        return await res.json();
+    },
+
+    patch: async function(path, value) {
+        var res = await fetch(this.url(path), {
+            method: 'PATCH',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify(value)
+        });
+        if (!res.ok) throw new Error('PATCH ' + path + ': ' + res.status);
+        return await res.json();
+    },
+
+    delete: async function(path) {
+        var res = await fetch(this.url(path), { method: 'DELETE' });
+        if (!res.ok) throw new Error('DELETE ' + path + ': ' + res.status);
+        return await res.json();
+    },
+
+    saveCollection: async function(collection) {
+        if (!STATE.connected) {
+            saveLocal();
+            return false;
+        }
+        showSync('syncing', 'Saving ' + collection + '...');
+        try {
+            await this.put(collection, STATE.data[collection]);
+            saveLocal();
+            showSync('success', 'Saved!');
+            setTimeout(hideSync, 1500);
+            return true;
+        } catch (e) {
+            showSync('error', 'Save failed — kept locally');
+            saveLocal();
+            setTimeout(hideSync, 3000);
+            return false;
+        }
+    },
+
+    load: async function() {
+        try {
+            var agents = await this.get('agents') || [];
+            var customers = await this.get('customers') || [];
+            var calls = await this.get('calls') || [];
+            var clients = await this.get('clients') || [];
+            STATE.data = { agents: agents, customers: customers, calls: calls, clients: clients };
+            saveLocal();
+            return STATE.data;
+        } catch (e) {
+            console.warn('Load failed:', e);
+            throw e;
+        }
+    },
+
+    listen: function() {
+        this.stopListen();
+        if (!STATE.connected || !STATE.baseUrl || !CONFIG.POLL_INTERVAL) return;
+        STATE._pollTimer = setInterval(async function() {
+            if (document.hidden) return;
+            try {
+                var fresh = await DB.load();
+                var newHash = hashData(fresh);
+                if (newHash !== STATE._lastHash) {
+                    STATE._lastHash = newHash;
+                    invalidateCache();
+                    refreshUI();
+                    toast('Data updated from cloud', 'info');
+                }
+            } catch (e) { console.warn('Poll sync failed:', e); }
+        }, CONFIG.POLL_INTERVAL);
+    },
+
+    stopListen: function() {
+        if (STATE._pollTimer) {
+            clearInterval(STATE._pollTimer);
+            STATE._pollTimer = null;
+        }
+    },
+
+    connect: async function(url) {
+        STATE.baseUrl = url.replace(/\/$/, '').replace(/\.json$/, '');
+        showSync('syncing', 'Connecting to Firebase...');
+        try {
+            var test = await this.get('');
+            STATE.connected = true;
+            if (test === null) {
+                await this.put('agents', []);
+                await this.put('customers', []);
+                await this.put('calls', []);
+                await this.put('clients', []);
+            } else {
+                await this.load();
+            }
+            saveLocal();
+            updateCloudUI();
+            showSync('success', 'Connected to Firebase!');
+            setTimeout(hideSync, 2000);
+            saveUrlToHash();
+            return true;
+        } catch (e) {
+            STATE.connected = false;
+            updateCloudUI();
+            showSync('error', 'Connection failed');
+            setTimeout(hideSync, 3000);
+            throw e;
+        }
+    }
+};
+
+function saveLocal() {
+    try {
+        localStorage.setItem('zynlo_backup', JSON.stringify({
+            baseUrl: STATE.baseUrl,
+            data: STATE.data
+        }));
+    } catch (e) { console.warn('localStorage full'); }
+}
+
+function loadLocal() {
+    var saved = localStorage.getItem('zynlo_backup');
+    if (saved) {
+        try {
+            var parsed = JSON.parse(saved);
+            if (parsed.baseUrl) STATE.baseUrl = parsed.baseUrl;
+            if (parsed.data) {
+                STATE.data = {
+                    agents: parsed.data.agents || [],
+                    customers: parsed.data.customers || [],
+                    calls: parsed.data.calls || [],
+                    clients: parsed.data.clients || []
+                };
+            }
+        } catch (e) { console.warn('Failed to parse local backup', e); }
+    }
+    STATE.data.agents = STATE.data.agents || [];
+    STATE.data.customers = STATE.data.customers || [];
+    STATE.data.calls = STATE.data.calls || [];
+    STATE.data.clients = STATE.data.clients || [];
+}
+
+// ==================== TOAST NOTIFICATIONS ====================
+function toast(message, type) {
+    type = type || 'info';
+    var container = document.getElementById('toast-container');
+    var el = document.createElement('div');
+    el.className = 'toast ' + type;
+    var icons = { success: '\u2705', error: '\u274C', warning: '\u26A0\uFE0F', info: '\u2139\uFE0F' };
+    el.innerHTML = '<span>' + (icons[type] || '\u2139\uFE0F') + '</span><span>' + escapeHtml(message) + '</span>';
+    container.appendChild(el);
+    setTimeout(function() {
+        el.classList.add('removing');
+        setTimeout(function() { el.remove(); }, 300);
+    }, 3000);
+}
+
+// ==================== CONFIRM MODAL ====================
+function confirmAction(options) {
+    return new Promise(function(resolve) {
+        STATE._pendingConfirm = { resolve: resolve };
+        document.getElementById('confirm-icon').textContent = options.icon || '\u26A0\uFE0F';
+        document.getElementById('confirm-title').textContent = options.title || 'Are you sure?';
+        document.getElementById('confirm-message').textContent = options.message || 'This action cannot be undone.';
+        var btn = document.getElementById('confirm-btn');
+        btn.textContent = options.confirmText || 'Delete';
+        btn.style.background = options.danger ? 'var(--danger)' : 'var(--primary)';
+        document.getElementById('modal-confirm').classList.add('active');
+    });
+}
+
+function closeConfirmModal() {
+    document.getElementById('modal-confirm').classList.remove('active');
+    if (STATE._pendingConfirm) {
+        STATE._pendingConfirm.resolve(false);
+        STATE._pendingConfirm = null;
+    }
+}
+
+function executeConfirm() {
+    document.getElementById('modal-confirm').classList.remove('active');
+    if (STATE._pendingConfirm) {
+        STATE._pendingConfirm.resolve(true);
+        STATE._pendingConfirm = null;
+    }
+}
+
+// ==================== SYNC UI ====================
+function showSync(state, text) {
+    var el = document.getElementById('sync-indicator');
+    var icon = document.getElementById('sync-icon');
+    var txt = document.getElementById('sync-text');
+    el.className = 'sync-indicator show ' + state;
+    if (text) txt.textContent = text;
+    icon.textContent = state === 'success' ? '\u2705' : state === 'error' ? '\u26A0\uFE0F' : '\uD83D\uDD04';
+}
+function hideSync() {
+    document.getElementById('sync-indicator').classList.remove('show');
+}
+
+function updateCloudUI() {
+    var status = document.getElementById('cloud-status');
+    var text = document.getElementById('cloud-status-text');
+    if (STATE.connected) {
+        status.className = 'cloud-status online';
+        text.textContent = 'Online — Firebase RTDB';
+    } else {
+        status.className = 'cloud-status offline';
+        text.textContent = 'Not connected';
+    }
+}
+
+function saveUrlToHash() {
+    if (STATE.baseUrl) {
+        window.location.hash = 'db=' + encodeURIComponent(STATE.baseUrl);
+    }
+}
+
+function loadUrlFromHash() {
+    var hash = window.location.hash;
+    var match = hash.match(/db=([^&]+)/);
+    return match ? decodeURIComponent(match[1]) : null;
+}
+
+function showSetupGuide() {
+    document.getElementById('modal-setup').classList.add('active');
+}
+
+async function connectFirebase() {
+    var url = document.getElementById('firebase-url').value.trim();
+    if (!url) {
+        toast('Please paste your Firebase Realtime Database URL. Click "Setup Guide" for instructions.', 'warning');
+        return;
+    }
+    if (!url.startsWith('http')) url = 'https://' + url;
+    url = url.replace(/\/$/, '');
+    if (url.endsWith('.json')) url = url.slice(0, -5);
+
+    try {
+        await DB.connect(url);
+        await refreshUI();
+        toast('Connected to Firebase!', 'success');
+    } catch (e) {
+        toast('Connection failed. Check URL and database rules.', 'error');
+    }
+}
+
+// ==================== HELPERS ====================
+function uid() { return Date.now().toString(36) + Math.random().toString(36).substr(2); }
+function escapeHtml(str) {
+    if (!str) return '';
+    return str.replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;').replace(/"/g, '&quot;').replace(/'/g, '&#039;');
+}
+function highlightText(text, query) {
+    if (!query) return escapeHtml(text);
+    var regex = new RegExp('(' + escapeRegExp(query) + ')', 'gi');
+    return escapeHtml(text).replace(regex, '<span class="highlight">$1</span>');
+}
+function escapeRegExp(str) {
+    return str.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+}
+function formatDate(d) {
+    if (!d) return '-';
+    var date = new Date(d);
+    if (isNaN(date.getTime())) return '-';
+    return date.toLocaleString('en-GB', { day: '2-digit', month: 'short', year: 'numeric', hour: '2-digit', minute: '2-digit' });
+}
+function formatDuration(mins) {
+    if (mins === null || mins === undefined || isNaN(mins)) return '0m';
+    if (mins < 1) return Math.round(mins * 60) + 's';
+    return Math.round(mins * 10) / 10 + 'm';
+}
+function todayStr() { var d = new Date(); return d.getFullYear() + '-' + String(d.getMonth()+1).padStart(2,'0') + '-' + String(d.getDate()).padStart(2,'0'); }
+function yesterdayStr() {
+    var d = new Date(); d.setDate(d.getDate() - 1);
+    return d.getFullYear() + '-' + String(d.getMonth()+1).padStart(2,'0') + '-' + String(d.getDate()).padStart(2,'0');
+}
+function getAgentInitials(name) {
+    if (!name) return '?';
+    return name.split(' ').map(function(n) { return n[0]; }).join('').toUpperCase().slice(0, 2);
+}
+function getOutcomeBadge(outcome) {
+    return '<span class="badge ' + (CONFIG.OUTCOME_BADGES[outcome] || 'badge-secondary') + '">' + escapeHtml(outcome || 'Unknown') + '</span>';
+}
+function getStatusBadge(status) {
+    return '<span class="badge ' + (CONFIG.STATUS_BADGES[status] || 'badge-secondary') + '">' + escapeHtml(status || 'Unknown') + '</span>';
+}
+function hashData(data) {
+    return JSON.stringify({
+        a: data.agents.length,
+        c: data.customers.length,
+        ca: data.calls.length,
+        cl: data.clients.length,
+        calls: (data.calls || []).slice(-3).map(function(c) { return c.id + c.datetime + c.outcome; }).join(',')
+    });
+}
+
+// ==================== CACHED STATS ====================
+function invalidateCache() {
+    STATE._statsCache = {};
+}
+
+function getAgent(id) {
+    if (!STATE._statsCache._agentMap) {
+        STATE._statsCache._agentMap = {};
+        (STATE.data.agents || []).forEach(function(a) { STATE._statsCache._agentMap[a.id] = a; });
+    }
+    return STATE._statsCache._agentMap[id] || { name: 'Unknown' };
+}
+
+function getCustomer(id) {
+    if (!STATE._statsCache._customerMap) {
+        STATE._statsCache._customerMap = {};
+        (STATE.data.customers || []).forEach(function(c) { STATE._statsCache._customerMap[c.id] = c; });
+    }
+    return STATE._statsCache._customerMap[id] || { name: 'Unknown', phone: '' };
+}
+
+function getAgentStats(agentId) {
+    var cacheKey = 'agent_' + agentId;
+    if (STATE._statsCache[cacheKey]) return STATE._statsCache[cacheKey];
+    var agentCalls = (STATE.data.calls || []).filter(function(c) { return c.agentId === agentId; });
+    var total = agentCalls.length;
+    var resolved = agentCalls.filter(function(c) { return c.outcome === 'Resolved'; }).length;
+    var resolutionRate = total ? (resolved / total) : 0;
+    var avgDuration = total ? (agentCalls.reduce(function(s, c) { return s + (c.duration || 0); }, 0) / total) : 0;
+    var rated = agentCalls.filter(function(c) { return c.rating; });
+    var csat = rated.length ? (rated.reduce(function(s, c) { return s + c.rating; }, 0) / rated.length) : 0;
+    var stats = { total: total, resolved: resolved, resolutionRate: resolutionRate, avgDuration: avgDuration, csat: csat };
+    STATE._statsCache[cacheKey] = stats;
+    return stats;
+}
+
+function getCustomerStats(customerId) {
+    var cacheKey = 'cust_' + customerId;
+    if (STATE._statsCache[cacheKey]) return STATE._statsCache[cacheKey];
+    var custCalls = (STATE.data.calls || []).filter(function(c) { return c.customerId === customerId; });
+    var sorted = custCalls.slice().sort(function(a, b) { return new Date(b.datetime || 0) - new Date(a.datetime || 0); });
+    var stats = { total: custCalls.length, lastCall: sorted[0] || null };
+    STATE._statsCache[cacheKey] = stats;
+    return stats;
+}
+
+// ==================== NAVIGATION ====================
+async function showSection(id, el) {
+    document.querySelectorAll('.section').forEach(function(s) { s.classList.remove('active'); });
+    document.getElementById(id).classList.add('active');
+    document.querySelectorAll('.nav-item').forEach(function(n) { n.classList.remove('active'); });
+    if (el) el.classList.add('active');
+    if (window.innerWidth <= 768) document.getElementById('sidebar').classList.remove('open');
+    if (id === 'dashboard') await renderDashboard();
+    if (id === 'calls') await renderCalls();
+    if (id === 'agents') await renderAgents();
+    if (id === 'customers') await renderCustomers();
+    if (id === 'analytics') await renderAnalytics();
+    if (id === 'clients') await renderClients();
+}
+
+function showTab(id, el) {
+    document.querySelectorAll('.tab-content').forEach(function(t) { t.classList.remove('active'); });
+    document.getElementById(id).classList.add('active');
+    document.querySelectorAll('.tab').forEach(function(t) { t.classList.remove('active'); });
+    el.classList.add('active');
+    if (id === 'performance-tab') setTimeout(function() { renderPerformanceCharts(); }, 50);
+    if (id === 'trends-tab') setTimeout(function() { renderTrendsChart(); }, 100);
+    if (id === 'agent-rank-tab') renderAgentRankings();
+}
+function toggleSidebar() { document.getElementById('sidebar').classList.toggle('open'); }
+
+// ==================== EXPORT FUNCTIONALITY ====================
+function openExportModal() {
+    document.getElementById('modal-export').classList.add('active');
+}
+
+function exportData(format, type, extra) {
+    closeModal('export');
+    var data = STATE.data;
+    var filename = 'zynlo_' + type + '_' + new Date().toISOString().split('T')[0];
+
+    if (format === 'json') {
+        var blob = new Blob([JSON.stringify(data, null, 2)], { type: 'application/json' });
+        downloadBlob(blob, filename + '.json');
+        toast('Full backup exported', 'success');
+        return;
+    }
+
+    if (format === 'csv') {
+        var csv = '';
+        if (type === 'calls') {
+            csv = 'ID,DateTime,Agent,Customer,Type,Duration,Outcome,Rating,Notes\n';
+            (data.calls || []).forEach(function(c) {
+                var agent = getAgent(c.agentId);
+                var customer = getCustomer(c.customerId);
+                csv += [c.id, c.datetime, agent.name, customer.name, c.type, c.duration, c.outcome, c.rating || '', c.notes || ''].map(escapeCsv).join(',') + '\n';
+            });
+        } else if (type === 'agents') {
+            csv = 'Name,Email,Role,Status,Total Calls,Resolution Rate,Avg Duration,QA Score\n';
+            (data.agents || []).forEach(function(a) {
+                var stats = getAgentStats(a.id);
+                csv += [a.name, a.email || '', a.role, a.status, stats.total, Math.round(stats.resolutionRate * 100) + '%', formatDuration(stats.avgDuration), stats.csat ? stats.csat.toFixed(1) : ''].map(escapeCsv).join(',') + '\n';
+            });
+        } else if (type === 'customers') {
+            csv = 'Name,Phone,Email,Company,Total Calls,Last Contact\n';
+            (data.customers || []).forEach(function(c) {
+                var stats = getCustomerStats(c.id);
+                csv += [c.name, c.phone, c.email || '', c.company || '', stats.total, stats.lastCall ? formatDate(stats.lastCall.datetime) : 'Never'].map(escapeCsv).join(',') + '\n';
+            });
+        } else if (type === 'clients') {
+            csv = 'Company,Contact Name,Phone,Email,Total Calls,Resolved,Escalated,Avg Duration,QA Score,Last Contact,Notes\n';
+            var clients = buildClientData();
+            var selectedClient = extra && extra.clientName ? extra.clientName : null;
+            clients.forEach(function(client) {
+                if (selectedClient && client.name !== selectedClient) return;
+                client.contacts.forEach(function(contact) {
+                    var cStats = contact.stats;
+                    var customer = getCustomer(contact.id);
+                    csv += [client.name, contact.name, contact.phone, contact.email || '', cStats.total, cStats.resolved, cStats.escalated, formatDuration(cStats.avgDuration), cStats.qaScore ? cStats.qaScore.toFixed(1) : '', cStats.lastContact ? formatDate(cStats.lastContact) : '', cStats.callNotes || ''].map(escapeCsv).join(',') + '\n';
+                });
+            });
+        }
+        var blob = new Blob([csv], { type: 'text/csv;charset=utf-8;' });
+        downloadBlob(blob, filename + '.csv');
+        toast(type.charAt(0).toUpperCase() + type.slice(1) + ' exported to CSV', 'success');
+    }
+}
+
+function escapeCsv(val) {
+    if (val === null || val === undefined) return '';
+    var str = String(val);
+    if (str.includes(',') || str.includes('"') || str.includes('\n')) {
+        return '"' + str.replace(/"/g, '""') + '"';
+    }
+    return str;
+}
+
+function downloadBlob(blob, filename) {
+    var url = URL.createObjectURL(blob);
+    var a = document.createElement('a');
+    a.href = url;
+    a.download = filename;
+    document.body.appendChild(a);
+    a.click();
+    document.body.removeChild(a);
+    URL.revokeObjectURL(url);
+}
+
+// ==================== CLIENTS SECTION ====================
+function buildClientData() {
+    var clients = STATE.data.clients || [];
+    var customers = STATE.data.customers || [];
+    var calls = STATE.data.calls || [];
+
+    return clients.map(function(client) {
+        var clientCalls = calls.filter(function(call) { return call.client === client.name; });
+        var linkedCustomerIds = {};
+        clientCalls.forEach(function(call) { linkedCustomerIds[call.customerId] = true; });
+        var contacts = customers.filter(function(c) { return linkedCustomerIds[c.id]; }).map(function(c) {
+            var custCalls = clientCalls.filter(function(call) { return call.customerId === c.id; });
+            var resolved = custCalls.filter(function(call) { return call.outcome === 'Resolved'; }).length;
+            var escalated = custCalls.filter(function(call) { return call.outcome === 'Escalated'; }).length;
+            var rated = custCalls.filter(function(call) { return call.rating; });
+            var qaScore = rated.length ? (rated.reduce(function(s, call) { return s + call.rating; }, 0) / rated.length) : 0;
+            var avgDuration = custCalls.length ? (custCalls.reduce(function(s, call) { return s + (call.duration || 0); }, 0) / custCalls.length) : 0;
+            var sortedCalls = custCalls.slice().sort(function(a, b) { return new Date(b.datetime || 0) - new Date(a.datetime || 0); });
+            var callNotes = custCalls.filter(function(call) { return call.notes; }).map(function(call) { return call.notes; }).join('; ');
+            return {
+                id: c.id,
+                name: c.name,
+                phone: c.phone,
+                email: c.email,
+                stats: {
+                    total: custCalls.length,
+                    resolved: resolved,
+                    escalated: escalated,
+                    avgDuration: avgDuration,
+                    qaScore: qaScore,
+                    lastContact: sortedCalls[0] ? sortedCalls[0].datetime : null,
+                    callNotes: callNotes
+                }
+            };
+        });
+
+        var totalCalls = clientCalls.length;
+        var resolved = clientCalls.filter(function(c) { return c.outcome === 'Resolved'; }).length;
+        var rated = clientCalls.filter(function(c) { return c.rating; });
+        var qaScore = rated.length ? (rated.reduce(function(s, c) { return s + c.rating; }, 0) / rated.length) : 0;
+        var avgDuration = totalCalls ? (clientCalls.reduce(function(s, c) { return s + (c.duration || 0); }, 0) / totalCalls) : 0;
+        var sorted = clientCalls.slice().sort(function(a, b) { return new Date(b.datetime || 0) - new Date(a.datetime || 0); });
+
+        return {
+            id: client.id,
+            name: client.name,
+            contacts: contacts,
+            totalCalls: totalCalls,
+            resolved: resolved,
+            resolutionRate: totalCalls ? (resolved / totalCalls) : 0,
+            qaScore: qaScore,
+            avgDuration: avgDuration,
+            lastContact: sorted[0] ? sorted[0].datetime : null,
+            notes: client.notes || ''
+        };
+    });
+}
+
+function renderClients() {
+    var search = (document.getElementById('client-search') ? document.getElementById('client-search').value : '').toLowerCase();
+    var sort = document.getElementById('client-sort') ? document.getElementById('client-sort').value : 'calls-desc';
+    var container = document.getElementById('clients-list');
+    var empty = document.getElementById('clients-empty');
+
+    var clients = buildClientData();
+
+    if (search) {
+        clients = clients.filter(function(c) {
+            return c.name.toLowerCase().includes(search) || c.contacts.some(function(con) { return con.name.toLowerCase().includes(search); });
+        });
+    }
+
+    clients.sort(function(a, b) {
+        if (sort === 'calls-desc') return b.totalCalls - a.totalCalls;
+        if (sort === 'calls-asc') return a.totalCalls - b.totalCalls;
+        if (sort === 'name-asc') return a.name.localeCompare(b.name);
+        if (sort === 'name-desc') return b.name.localeCompare(a.name);
+        if (sort === 'last-contact') return new Date(b.lastContact || 0) - new Date(a.lastContact || 0);
+        return 0;
+    });
+
+    if (clients.length === 0) {
+        container.innerHTML = '';
+        empty.style.display = 'block';
+        return;
+    }
+    empty.style.display = 'none';
+
+    var isMobile = window.innerWidth <= 768;
+
+    if (isMobile) {
+        container.innerHTML = clients.map(function(client) {
+            var fillClass = client.resolutionRate >= 0.8 ? 'green' : client.resolutionRate >= 0.5 ? 'amber' : 'red';
+            return '<div class="client-card-mobile">' +
+                '<div class="title">' + escapeHtml(client.name) + '</div>' +
+                '<div class="subtitle">' + client.contacts.length + ' contact' + (client.contacts.length !== 1 ? 's' : '') + '</div>' +
+                '<div class="stats-row">' +
+                    '<div class="stat"><div class="label">Calls</div><div class="value">' + client.totalCalls + '</div></div>' +
+                    '<div class="stat"><div class="label">Resolved</div><div class="value">' + client.resolved + '</div></div>' +
+                    '<div class="stat"><div class="label">Avg Time</div><div class="value">' + formatDuration(client.avgDuration) + '</div></div>' +
+                    '<div class="stat"><div class="label">QA</div><div class="value">' + (client.qaScore ? client.qaScore.toFixed(1) : '-') + '</div></div>' +
+                '</div>' +
+                '<div class="progress-bar" style="margin-bottom:12px"><div class="progress-fill ' + fillClass + '" style="width:' + Math.round(client.resolutionRate * 100) + '%"></div></div>' +
+                '<div class="contacts-list">' +
+                    client.contacts.map(function(c) {
+                        return '<div class="contact-item"><strong>' + escapeHtml(c.name) + '</strong><br><span style="color:var(--text-light);font-size:12px">' + escapeHtml(c.phone) + (c.email ? ' \u00B7 ' + escapeHtml(c.email) : '') + '</span></div>';
+                    }).join('') +
+                '</div>' +
+                '<div class="actions">' +
+                    '<button class="btn btn-sm btn-secondary" onclick="openModal(\'client\',\'' + client.id + '\')">✏️ Edit</button>' +
+                    '<button class="btn btn-sm btn-secondary" style="color:var(--danger);border-color:var(--danger)" onclick="deleteClient(\'' + client.id + '\')">🗑️ Delete</button>' +
+                '</div>' +
+            '</div>';
+        }).join('');
+    } else {
+        container.innerHTML = clients.map(function(client, idx) {
+            var fillClass = client.resolutionRate >= 0.8 ? 'green' : client.resolutionRate >= 0.5 ? 'amber' : 'red';
+            return '<div class="client-detail-card" id="client-card-' + idx + '">' +
+                '<div class="client-detail-header" onclick="toggleClientCard(' + idx + ')">' +
+                    '<div>' +
+                        '<div class="client-name">\uD83C\uDFE2 ' + escapeHtml(client.name) + '</div>' +
+                        '<div class="client-meta">' + client.contacts.length + ' contact' + (client.contacts.length !== 1 ? 's' : '') + ' \u00B7 Last contact: ' + (client.lastContact ? formatDate(client.lastContact) : 'Never') + '</div>' +
+                    '</div>' +
+                    '<div class="toggle-icon">\u25BC</div>' +
+                '</div>' +
+                '<div class="client-detail-body">' +
+                    '<div class="client-kpi-row">' +
+                        '<div class="client-kpi"><div class="label">Total Calls</div><div class="value">' + client.totalCalls + '</div></div>' +
+                        '<div class="client-kpi"><div class="label">Resolved</div><div class="value">' + client.resolved + '</div></div>' +
+                        '<div class="client-kpi"><div class="label">Resolution Rate</div><div class="value">' + Math.round(client.resolutionRate * 100) + '%</div></div>' +
+                        '<div class="client-kpi"><div class="label">Avg Handle Time</div><div class="value">' + formatDuration(client.avgDuration) + '</div></div>' +
+                        '<div class="client-kpi"><div class="label">QA Score</div><div class="value">' + (client.qaScore ? client.qaScore.toFixed(1) : '-') + '</div></div>' +
+                    '</div>' +
+                    '<div class="progress-bar" style="margin-bottom:16px"><div class="progress-fill ' + fillClass + '" style="width:' + Math.round(client.resolutionRate * 100) + '%"></div></div>' +
+                    '<div class="card">' +
+                        '<div class="card-header"><div class="card-title">Contacts</div></div>' +
+                        '<div class="card-body" style="padding:0">' +
+                            '<div class="table-wrap"><table><thead><tr><th>Name</th><th>Phone</th><th>Email</th><th>Calls</th><th>Resolved</th><th>Escalated</th><th>QA</th><th>Last Contact</th><th>Notes</th></tr></thead><tbody>' +
+                            client.contacts.map(function(c) {
+                                var customer = getCustomer(c.id); return '<tr><td><strong>' + escapeHtml(c.name) + '</strong></td><td>' + escapeHtml(c.phone) + '</td><td>' + (c.email ? escapeHtml(c.email) : '-') + '</td><td>' + c.stats.total + '</td><td>' + c.stats.resolved + '</td><td>' + c.stats.escalated + '</td><td>' + (c.stats.qaScore ? c.stats.qaScore.toFixed(1) : '-') + '</td><td>' + (c.stats.lastContact ? formatDate(c.stats.lastContact) : 'Never') + '</td><td>' + (c.stats.callNotes ? escapeHtml(c.stats.callNotes) : '-') + '</td></tr>';
+                            }).join('') +
+                            '</tbody></table></div>' +
+                        '</div>' +
+                    '</div>' +
+                    '<div style="display:flex;gap:8px;justify-content:flex-end;margin-top:16px;">' +
+                        '<button class="btn btn-sm btn-secondary" onclick="openModal(\'client\',\'' + client.id + '\')">✏️ Edit</button>' +
+                        '<button class="btn btn-sm btn-secondary" style="color:var(--danger);border-color:var(--danger)" onclick="deleteClient(\'' + client.id + '\')">🗑️ Delete</button>' +
+                    '</div>' +
+                '</div>' +
+            '</div>';
+        }).join('');
+    }
+}
+
+function toggleClientCard(idx) {
+    var card = document.getElementById('client-card-' + idx);
+    if (card) card.classList.toggle('open');
+}
+
+// ==================== MODALS ====================
+function openModal(type, id) {
+    id = id || null;
+    var modal = document.getElementById('modal-' + type);
+    modal.classList.add('active');
+    if (type === 'call') {
+        document.getElementById('call-form').reset();
+        document.getElementById('call-id').value = '';
+        document.getElementById('call-datetime').value = new Date().toISOString().slice(0, 16);
+        populateAgentSelect(); populateCustomerSelect(); populateClientSelect();
+        var warning = document.getElementById('call-modal-warning');
+        var agents = STATE.data.agents || [];
+        var customers = STATE.data.customers || [];
+        if (warning) {
+            if (agents.length === 0 && customers.length === 0) {
+                warning.textContent = '\u26A0\uFE0F Please add at least one Agent and one Customer before logging calls.';
+                warning.style.display = 'block';
+            } else if (agents.length === 0) {
+                warning.textContent = '\u26A0\uFE0F Please add at least one Agent before logging calls.';
+                warning.style.display = 'block';
+            } else if (customers.length === 0) {
+                warning.textContent = '\u26A0\uFE0F Please add at least one Customer before logging calls.';
+                warning.style.display = 'block';
+            } else {
+                warning.style.display = 'none';
+            }
+        }
+        document.getElementById('call-modal-title').textContent = id ? 'Edit Call' : 'Log New Call';
+        if (id) {
+            var call = (STATE.data.calls || []).find(function(c) { return c.id === id; });
+            if (call) {
+                document.getElementById('call-id').value = call.id;
+                document.getElementById('call-datetime').value = call.datetime;
+                document.getElementById('call-agent').value = call.agentId;
+                document.getElementById('call-customer').value = call.customerId;
+                document.getElementById('call-type').value = call.type;
+                document.getElementById('call-duration').value = call.duration;
+                document.getElementById('call-outcome').value = call.outcome;
+                document.getElementById('call-rating').value = call.rating || '';
+                document.getElementById('call-notes').value = call.notes || '';
+                if (call.client) document.getElementById('call-client').value = call.client;
+            }
+        }
+    } else if (type === 'agent') {
+        document.getElementById('agent-form').reset();
+        document.getElementById('agent-id').value = '';
+        document.getElementById('agent-modal-title').textContent = id ? 'Edit Agent' : 'Add Agent';
+        if (id) {
+            var agent = (STATE.data.agents || []).find(function(a) { return a.id === id; });
+            if (agent) {
+                document.getElementById('agent-id').value = agent.id;
+                document.getElementById('agent-name').value = agent.name;
+                document.getElementById('agent-email').value = agent.email || '';
+                document.getElementById('agent-role').value = agent.role;
+                document.getElementById('agent-status').value = agent.status;
+            }
+        }
+    } else if (type === 'customer') {
+        document.getElementById('customer-form').reset();
+        document.getElementById('customer-id').value = '';
+        document.getElementById('customer-modal-title').textContent = id ? 'Edit Customer' : 'Add Customer';
+        if (id) {
+            var customer = (STATE.data.customers || []).find(function(c) { return c.id === id; });
+            if (customer) {
+                document.getElementById('customer-id').value = customer.id;
+                document.getElementById('customer-name').value = customer.name;
+                document.getElementById('customer-phone').value = customer.phone;
+                document.getElementById('customer-email').value = customer.email || '';
+                document.getElementById('customer-company').value = customer.company || '';
+                
+                
+            }
+        }
+    } else if (type === 'client') {
+        document.getElementById('client-form').reset();
+        document.getElementById('client-id').value = '';
+        document.getElementById('client-modal-title').textContent = id ? 'Edit Client' : 'Add Client';
+        if (id) {
+            var client = (STATE.data.clients || []).find(function(c) { return c.id === id; });
+            if (client) {
+                document.getElementById('client-id').value = client.id;
+                document.getElementById('client-name').value = client.name;
+                document.getElementById('client-industry').value = client.industry || '';
+                document.getElementById('client-phone').value = client.phone || '';
+                document.getElementById('client-email').value = client.email || '';
+                document.getElementById('client-website').value = client.website || '';
+                document.getElementById('client-status').value = client.status || 'Active';
+                document.getElementById('client-address').value = client.address || '';
+                document.getElementById('client-notes').value = client.notes || '';
+            }
+        }
+    }
+}
+function closeModal(type) { document.getElementById('modal-' + type).classList.remove('active'); }
+function populateAgentSelect() {
+    var select = document.getElementById('call-agent');
+    var filter = document.getElementById('call-filter-agent');
+    var agents = STATE.data.agents || [];
+    if (select) {
+        select.innerHTML = '<option value="">Select Agent</option>' + agents.map(function(a) {
+            return '<option value="' + a.id + '">' + escapeHtml(a.name) + '</option>';
+        }).join('');
+    }
+    if (filter) {
+        filter.innerHTML = '<option value="">All Agents</option>' + agents.map(function(a) {
+            return '<option value="' + a.id + '">' + escapeHtml(a.name) + '</option>';
+        }).join('');
+    }
+}
+function populateCustomerSelect() {
+    var select = document.getElementById('call-customer');
+    var customers = STATE.data.customers || [];
+    if (select) {
+        select.innerHTML = '<option value="">Select Customer</option>' + customers.map(function(c) {
+            return '<option value="' + c.id + '">' + escapeHtml(c.name) + ' (' + escapeHtml(c.phone) + ')</option>';
+        }).join('');
+    }
+}
+
+function populateClientSelect() {
+    var select = document.getElementById('call-client');
+    var clients = STATE.data.clients || [];
+    if (select) {
+        select.innerHTML = '<option value="">Select Client</option>' + clients.map(function(c) {
+            return '<option value="' + escapeHtml(c.name) + '">' + escapeHtml(c.name) + '</option>';
+        }).join('');
+    }
+}
+
+
+// ==================== CRUD ====================
+async function saveCall(e) {
+    e.preventDefault();
+    var id = document.getElementById('call-id').value || uid();
+    var calls = (STATE.data.calls || []).slice();
+    var idx = calls.findIndex(function(c) { return c.id === id; });
+    var call = {
+        id: id,
+        datetime: document.getElementById('call-datetime').value,
+        agentId: document.getElementById('call-agent').value,
+        customerId: document.getElementById('call-customer').value,
+        client: document.getElementById('call-client').value,
+        type: document.getElementById('call-type').value,
+        duration: parseFloat(document.getElementById('call-duration').value) || 0,
+        outcome: document.getElementById('call-outcome').value,
+        rating: parseInt(document.getElementById('call-rating').value) || null,
+        notes: document.getElementById('call-notes').value
+    };
+    if (idx >= 0) calls[idx] = call; else calls.push(call);
+    STATE.data.calls = calls;
+    invalidateCache();
+    await DB.saveCollection('calls');
+    closeModal('call');
+    await renderDashboard();
+    await renderCalls();
+    toast('Call saved successfully', 'success');
+}
+
+async function deleteCall(id) {
+    var confirmed = await confirmAction({
+        title: 'Delete Call Record?',
+        message: 'This call record will be permanently removed.',
+        icon: '\uD83D\uDDD1\uFE0F',
+        danger: true
+    });
+    if (!confirmed) return;
+    STATE.data.calls = (STATE.data.calls || []).filter(function(c) { return c.id !== id; });
+    invalidateCache();
+    await DB.saveCollection('calls');
+    await renderDashboard();
+    await renderCalls();
+    toast('Call deleted', 'success');
+}
+
+async function saveAgent(e) {
+    e.preventDefault();
+    var id = document.getElementById('agent-id').value || uid();
+    var agents = (STATE.data.agents || []).slice();
+    var idx = agents.findIndex(function(a) { return a.id === id; });
+    var agent = {
+        id: id, name: document.getElementById('agent-name').value,
+        email: document.getElementById('agent-email').value,
+        role: document.getElementById('agent-role').value,
+        status: document.getElementById('agent-status').value
+    };
+    if (idx >= 0) agents[idx] = agent; else agents.push(agent);
+    STATE.data.agents = agents;
+    invalidateCache();
+    await DB.saveCollection('agents');
+    closeModal('agent');
+    await renderAgents();
+    populateAgentSelect();
+    toast('Agent saved successfully', 'success');
+}
+
+async function deleteAgent(id) {
+    var confirmed = await confirmAction({
+        title: 'Delete Agent?',
+        message: 'Their call history will remain. This cannot be undone.',
+        icon: '\uD83D\uDC64',
+        danger: true
+    });
+    if (!confirmed) return;
+    STATE.data.agents = (STATE.data.agents || []).filter(function(a) { return a.id !== id; });
+    invalidateCache();
+    await DB.saveCollection('agents');
+    await renderAgents();
+    populateAgentSelect();
+    toast('Agent deleted', 'success');
+}
+
+
+
+async function saveCustomer(e) {
+    e.preventDefault();
+    var id = document.getElementById('customer-id').value || uid();
+    var customers = (STATE.data.customers || []).slice();
+    var idx = customers.findIndex(function(c) { return c.id === id; });
+    var customer = {
+        id: id, name: document.getElementById('customer-name').value,
+        phone: document.getElementById('customer-phone').value,
+        email: document.getElementById('customer-email').value,
+        company: document.getElementById('customer-company').value
+    };
+    if (idx >= 0) customers[idx] = customer; else customers.push(customer);
+    STATE.data.customers = customers;
+    invalidateCache();
+    await DB.saveCollection('customers');
+    closeModal('customer');
+    await renderCustomers();
+    populateCustomerSelect();
+    toast('Customer saved successfully', 'success');
+}
+
+async function deleteCustomer(id) {
+    var confirmed = await confirmAction({
+        title: 'Delete Customer?',
+        message: 'This customer and their data will be permanently removed.',
+        icon: '\uD83E\uDD1D',
+        danger: true
+    });
+    if (!confirmed) return;
+    STATE.data.customers = (STATE.data.customers || []).filter(function(c) { return c.id !== id; });
+    invalidateCache();
+    await DB.saveCollection('customers');
+    await renderCustomers();
+    populateCustomerSelect();
+    toast('Customer deleted', 'success');
+}
+
+// ==================== RENDERING ====================
+function renderDashboard() {
+    var calls = STATE.data.calls || [];
+    var today = todayStr();
+    var yesterday = yesterdayStr();
+    var todayCalls = calls.filter(function(c) { return c.datetime && c.datetime.startsWith(today); });
+    var yestCalls = calls.filter(function(c) { return c.datetime && c.datetime.startsWith(yesterday); });
+
+    document.getElementById('kpi-total-calls').textContent = todayCalls.length;
+    var diff = todayCalls.length - yestCalls.length;
+    var changeEl = document.getElementById('kpi-calls-change');
+    changeEl.textContent = (diff >= 0 ? '+' : '') + diff + ' vs yesterday';
+    changeEl.className = 'kpi-change ' + (diff >= 0 ? 'up' : 'down');
+
+    var resolved = calls.filter(function(c) { return c.outcome === 'Resolved'; }).length;
+    var resolutionRate = calls.length ? Math.round((resolved / calls.length) * 100) : 0;
+    document.getElementById('kpi-resolution').textContent = resolutionRate + '%';
+    document.getElementById('kpi-resolution-bar').style.width = resolutionRate + '%';
+
+    var avgDuration = calls.length ? (calls.reduce(function(s, c) { return s + (c.duration || 0); }, 0) / calls.length) : 0;
+    document.getElementById('kpi-aht').textContent = formatDuration(avgDuration);
+
+    var ratedCalls = calls.filter(function(c) { return c.rating; });
+    var avgRating = ratedCalls.length ? (ratedCalls.reduce(function(s, c) { return s + c.rating; }, 0) / ratedCalls.length).toFixed(1) : '0.0';
+    document.getElementById('kpi-csat').textContent = avgRating;
+
+    var recent = calls.slice().sort(function(a, b) {
+        var da = new Date(a.datetime).getTime();
+        var db = new Date(b.datetime).getTime();
+        if (isNaN(da) && isNaN(db)) return 0;
+        if (isNaN(da)) return 1;
+        if (isNaN(db)) return -1;
+        return db - da;
+    }).slice(0, CONFIG.MAX_RECENT_CALLS);
+
+    var tableHtml = recent.map(function(c) {
+        var agent = getAgent(c.agentId);
+        var customer = getCustomer(c.customerId);
+        var stars = '';
+        if (c.rating) { for (var i = 0; i < c.rating; i++) stars += '\u2605'; for (var i = 0; i < 5 - c.rating; i++) stars += '\u2606'; }
+        return '<tr><td>' + formatDate(c.datetime) + '</td><td><span class="agent-avatar">' + getAgentInitials(agent.name) + '</span>' + escapeHtml(agent.name) + '</td><td>' + escapeHtml(customer.name) + '</td><td>' + formatDuration(c.duration) + '</td><td>' + getOutcomeBadge(c.outcome) + '</td><td>' + (c.rating ? '<span class="stars">' + stars + '</span>' : '-') + '</td><td>' + (c.notes ? '<span style="font-size:12px;color:var(--text-light);max-width:200px;display:inline-block;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;" title="' + escapeHtml(c.notes) + '">' + escapeHtml(c.notes.length > 50 ? c.notes.substring(0, 50) + '...' : c.notes) + '</span>' : '-') + '</td></tr>';
+    }).join('') || '<tr><td colspan="7" style="text-align:center;color:var(--text-light);padding:40px">No calls yet</td></tr>';
+
+    var cardsHtml = recent.map(function(c) {
+        var agent = getAgent(c.agentId);
+        var customer = getCustomer(c.customerId);
+        var stars = '';
+        if (c.rating) { for (var i = 0; i < c.rating; i++) stars += '\u2605'; }
+        return '<div class="card-list-item"><div class="title">' + escapeHtml(customer.name) + '</div><div class="subtitle">' + formatDate(c.datetime) + ' &bull; ' + escapeHtml(agent.name) + '</div><div class="row"><span class="label">Duration</span><span class="value">' + formatDuration(c.duration) + '</span></div><div class="row"><span class="label">Outcome</span><span class="value">' + getOutcomeBadge(c.outcome) + '</span></div><div class="row"><span class="label">Rating</span><span class="value">' + (c.rating ? '<span class="stars">' + stars + '</span>' : '-') + '</span></div><div class="row"><span class="label">Notes</span><span class="value" style="font-size:12px;color:var(--text-light);">' + (c.notes ? escapeHtml(c.notes.length > 80 ? c.notes.substring(0, 80) + '...' : c.notes) : '-') + '</span></div></div>';
+    }).join('') || '<div class="empty-state" style="padding:40px"><div class="empty-state-icon">\uD83D\uDCCB</div><h3>No calls yet</h3></div>';
+
+    document.getElementById('recent-calls-table').innerHTML = tableHtml;
+    document.getElementById('recent-calls-cards').innerHTML = cardsHtml;
+
+    renderDashboardCharts(calls);
+}
+
+function renderCalls() {
+    var calls = STATE.data.calls || [];
+    var search = document.getElementById('call-search') ? document.getElementById('call-search').value.toLowerCase() : '';
+    var statusFilter = document.getElementById('call-filter-status') ? document.getElementById('call-filter-status').value : '';
+    var agentFilter = document.getElementById('call-filter-agent') ? document.getElementById('call-filter-agent').value : '';
+    var filtered = calls;
+    if (search) {
+        filtered = filtered.filter(function(c) {
+            var agent = getAgent(c.agentId);
+            var customer = getCustomer(c.customerId);
+            return agent.name.toLowerCase().includes(search) || customer.name.toLowerCase().includes(search) || (customer.phone && customer.phone.includes(search));
+        });
+    }
+    if (statusFilter) filtered = filtered.filter(function(c) { return c.outcome === statusFilter; });
+    if (agentFilter) filtered = filtered.filter(function(c) { return c.agentId === agentFilter; });
+    filtered.sort(function(a, b) {
+        var da = new Date(a.datetime).getTime();
+        var db = new Date(b.datetime).getTime();
+        if (isNaN(da) && isNaN(db)) return 0;
+        if (isNaN(da)) return 1;
+        if (isNaN(db)) return -1;
+        return db - da;
+    });
+
+    var tbody = document.getElementById('calls-table');
+    var cards = document.getElementById('calls-cards');
+    var empty = document.getElementById('calls-empty');
+    if (!tbody || !cards || !empty) return;
+    if (calls.length === 0) { tbody.innerHTML = ''; cards.innerHTML = ''; empty.style.display = 'block'; return; }
+    empty.style.display = 'none';
+
+    var tableHtml = filtered.map(function(c) {
+        var agent = getAgent(c.agentId);
+        var customer = getCustomer(c.customerId);
+        var stars = ''; if (c.rating) { for (var i = 0; i < c.rating; i++) stars += '\u2605'; }
+        return '<tr><td>' + formatDate(c.datetime) + '</td><td><span class="agent-avatar">' + getAgentInitials(agent.name) + '</span>' + escapeHtml(agent.name) + '</td><td>' + escapeHtml(customer.name) + '</td><td>' + c.type + '</td><td>' + formatDuration(c.duration) + '</td><td>' + getOutcomeBadge(c.outcome) + '</td><td>' + (c.rating ? '<span class="stars">' + stars + '</span>' : '-') + '</td><td><div class="action-btns"><button class="btn-icon edit" onclick="openModal(\'call\',\'' + c.id + '\')">\u270F\uFE0F</button><button class="btn-icon delete" onclick="deleteCall(\'' + c.id + '\')">\uD83D\uDDD1\uFE0F</button></div></td></tr>';
+    }).join('') || '<tr><td colspan="8" style="text-align:center;color:var(--text-light);padding:40px">No matching calls</td></tr>';
+
+    var cardsHtml = filtered.map(function(c) {
+        var agent = getAgent(c.agentId);
+        var customer = getCustomer(c.customerId);
+        var stars = ''; if (c.rating) { for (var i = 0; i < c.rating; i++) stars += '\u2605'; }
+        return '<div class="card-list-item"><div class="title">' + escapeHtml(customer.name) + '</div><div class="subtitle">' + formatDate(c.datetime) + '</div><div class="row"><span class="label">Agent</span><span class="value"><span class="agent-avatar">' + getAgentInitials(agent.name) + '</span>' + escapeHtml(agent.name) + '</span></div><div class="row"><span class="label">Type</span><span class="value">' + c.type + '</span></div><div class="row"><span class="label">Duration</span><span class="value">' + formatDuration(c.duration) + '</span></div><div class="row"><span class="label">Outcome</span><span class="value">' + getOutcomeBadge(c.outcome) + '</span></div><div class="row"><span class="label">Rating</span><span class="value">' + (c.rating ? '<span class="stars">' + stars + '</span>' : '-') + '</span></div><div class="actions"><button class="btn btn-sm btn-secondary" onclick="openModal(\'call\',\'' + c.id + '\')">\u270F\uFE0F Edit</button><button class="btn btn-sm btn-secondary" style="color:var(--danger);border-color:var(--danger)" onclick="deleteCall(\'' + c.id + '\')">\uD83D\uDDD1\uFE0F Delete</button></div></div>';
+    }).join('') || '<div class="empty-state" style="padding:40px"><p>No matching calls</p></div>';
+
+    tbody.innerHTML = tableHtml;
+    cards.innerHTML = cardsHtml;
+}
+
+function renderAgents() {
+    var agents = STATE.data.agents || [];
+    var tbody = document.getElementById('agents-table');
+    var cards = document.getElementById('agents-cards');
+    var empty = document.getElementById('agents-empty');
+    if (!tbody || !cards || !empty) return;
+    if (agents.length === 0) { tbody.innerHTML = ''; cards.innerHTML = ''; empty.style.display = 'block'; return; }
+    empty.style.display = 'none';
+
+    var tableHtml = agents.map(function(a) {
+        var stats = getAgentStats(a.id);
+        var resolutionRate = stats.total ? Math.round(stats.resolutionRate * 100) : 0;
+        var fillClass = resolutionRate >= 80 ? 'green' : resolutionRate >= 50 ? 'amber' : 'red';
+        return '<tr><td><span class="agent-avatar">' + getAgentInitials(a.name) + '</span><div style="display:inline-block;vertical-align:middle"><div style="font-weight:600">' + escapeHtml(a.name) + '</div><div style="font-size:12px;color:var(--text-light)">' + escapeHtml(a.email || '') + '</div></div></td><td>' + a.role + '</td><td><strong>' + stats.total + '</strong></td><td>' + formatDuration(stats.avgDuration) + '</td><td><div style="display:flex;align-items:center;gap:8px"><span style="font-weight:600">' + resolutionRate + '%</span><div class="progress-bar" style="width:80px"><div class="progress-fill ' + fillClass + '" style="width:' + resolutionRate + '%"></div></div></div></td><td>' + (stats.csat ? '<span class="stars">\u2605</span> ' + stats.csat.toFixed(1) : '-') + '</td><td>' + getStatusBadge(a.status) + '</td><td><div class="action-btns"><button class="btn-icon edit" onclick="openModal(\'agent\',\'' + a.id + '\')">\u270F\uFE0F</button><button class="btn-icon delete" onclick="deleteAgent(\'' + a.id + '\')">\uD83D\uDDD1\uFE0F</button></div></td></tr>';
+    }).join('');
+
+    var cardsHtml = agents.map(function(a) {
+        var stats = getAgentStats(a.id);
+        var resolutionRate = stats.total ? Math.round(stats.resolutionRate * 100) : 0;
+        var fillClass = resolutionRate >= 80 ? 'green' : resolutionRate >= 50 ? 'amber' : 'red';
+        return '<div class="card-list-item"><div class="title"><span class="agent-avatar">' + getAgentInitials(a.name) + '</span>' + escapeHtml(a.name) + '</div><div class="subtitle">' + a.role + ' &bull; ' + getStatusBadge(a.status) + '</div><div class="row"><span class="label">Calls</span><span class="value"><strong>' + stats.total + '</strong></span></div><div class="row"><span class="label">Avg Time</span><span class="value">' + formatDuration(stats.avgDuration) + '</span></div><div class="row"><span class="label">Resolution</span><span class="value"><span style="font-weight:600">' + resolutionRate + '%</span></span></div><div class="progress-bar" style="margin-bottom:8px"><div class="progress-fill ' + fillClass + '" style="width:' + resolutionRate + '%"></div></div><div class="row"><span class="label">QA Score</span><span class="value">' + (stats.csat ? '<span class="stars">\u2605</span> ' + stats.csat.toFixed(1) : '-') + '</span></div><div class="actions"><button class="btn btn-sm btn-secondary" onclick="openModal(\'agent\',\'' + a.id + '\')">\u270F\uFE0F Edit</button><button class="btn btn-sm btn-secondary" style="color:var(--danger);border-color:var(--danger)" onclick="deleteAgent(\'' + a.id + '\')">\uD83D\uDDD1\uFE0F Delete</button></div></div>';
+    }).join('');
+
+    tbody.innerHTML = tableHtml;
+    cards.innerHTML = cardsHtml;
+}
+
+function renderCustomers() {
+    var customers = STATE.data.customers || [];
+    var search = document.getElementById('customer-search') ? document.getElementById('customer-search').value.toLowerCase() : '';
+    var filtered = customers;
+    if (search) {
+        filtered = filtered.filter(function(c) {
+            return c.name.toLowerCase().includes(search) ||
+                   c.phone.includes(search) ||
+                   (c.email && c.email.toLowerCase().includes(search)) ||
+                   (c.company && c.company.toLowerCase().includes(search));
+        });
+    }
+    var tbody = document.getElementById('customers-table');
+    var cards = document.getElementById('customers-cards');
+    var empty = document.getElementById('customers-empty');
+    if (!tbody || !cards || !empty) return;
+    if (customers.length === 0) { tbody.innerHTML = ''; cards.innerHTML = ''; empty.style.display = 'block'; return; }
+    empty.style.display = 'none';
+
+    var tableHtml = filtered.map(function(c) {
+        var stats = getCustomerStats(c.id);
+        var custCalls = (STATE.data.calls || []).filter(function(call) { return call.customerId === c.id && call.notes; }).sort(function(a, b) { return new Date(b.datetime || 0) - new Date(a.datetime || 0); });
+        var notesHtml = '-';
+        if (custCalls.length > 0) {
+            notesHtml = custCalls.map(function(call) {
+                return '<div style="margin-bottom:4px;font-size:12px;line-height:1.4"><span style="color:var(--text-light);font-size:11px">' + formatDate(call.datetime).split(',')[0] + ':</span> ' + escapeHtml(call.notes.substring(0, 60) + (call.notes.length > 60 ? '...' : '')) + '</div>';
+            }).join('');
+        }
+        return '<tr><td><strong>' + escapeHtml(c.name) + '</strong></td><td>' + escapeHtml(c.phone) + '</td><td>' + (c.email ? escapeHtml(c.email) : '-') + '</td><td>' + (c.company ? escapeHtml(c.company) : '-') + '</td><td><strong>' + stats.total + '</strong></td><td>' + (stats.lastCall ? formatDate(stats.lastCall.datetime) : 'Never') + '</td><td>' + notesHtml + '</td><td><div class="action-btns"><button class="btn-icon edit" onclick="openModal(&#39;customer&#39;,&#39;' + c.id + '&#39;)">✏️</button><button class="btn-icon delete" onclick="deleteCustomer(&#39;' + c.id + '&#39;)">🗑️</button></div></td></tr>';
+    }).join('') || '<tr><td colspan="8" style="text-align:center;color:var(--text-light);padding:40px">No matching customers</td></tr>';
+
+    var cardsHtml = filtered.map(function(c) {
+        var stats = getCustomerStats(c.id);
+        var custCalls = (STATE.data.calls || []).filter(function(call) { return call.customerId === c.id && call.notes; }).sort(function(a, b) { return new Date(b.datetime || 0) - new Date(a.datetime || 0); });
+        var notesCardHtml = '';
+        if (custCalls.length > 0) {
+            notesCardHtml = '<div style="margin-top:12px;padding-top:12px;border-top:1px solid var(--border)">' +
+                custCalls.map(function(call) {
+                    return '<div style="margin-bottom:8px;font-size:13px;line-height:1.4"><span style="color:var(--text-light);font-size:11px;font-weight:600">' + formatDate(call.datetime).split(',')[0] + ':</span> ' + escapeHtml(call.notes) + '</div>';
+                }).join('') +
+                '</div>';
+        }
+        return '<div class="card-list-item"><div class="title">' + escapeHtml(c.name) + '</div><div class="row"><span class="label">Phone</span><span class="value">' + escapeHtml(c.phone) + '</span></div><div class="row"><span class="label">Email</span><span class="value">' + (c.email ? escapeHtml(c.email) : '-') + '</span></div><div class="row"><span class="label">Company</span><span class="value">' + (c.company ? escapeHtml(c.company) : '-') + '</span></div><div class="row"><span class="label">Total Calls</span><span class="value"><strong>' + stats.total + '</strong></span></div><div class="row"><span class="label">Last Contact</span><span class="value">' + (stats.lastCall ? formatDate(stats.lastCall.datetime) : 'Never') + '</span></div>' + notesCardHtml + '<div class="actions"><button class="btn btn-sm btn-secondary" onclick="openModal(&#39;customer&#39;,&#39;' + c.id + '&#39;)">✏️ Edit</button><button class="btn btn-sm btn-secondary" style="color:var(--danger);border-color:var(--danger)" onclick="deleteCustomer(&#39;' + c.id + '&#39;)">🗑️ Delete</button></div></div>';
+    }).join('') || '<div class="empty-state" style="padding:40px"><p>No matching customers</p></div>';
+
+    tbody.innerHTML = tableHtml;
+    cards.innerHTML = cardsHtml;
+}
+
+function renderAnalytics() {
+    var activeTab = document.querySelector('.tab-content.active');
+    if (activeTab) {
+        if (activeTab.id === 'performance-tab') renderPerformanceCharts();
+        if (activeTab.id === 'trends-tab') renderTrendsChart();
+        if (activeTab.id === 'agent-rank-tab') renderAgentRankings();
+    }
+}
+
+async function refreshUI() {
+    populateAgentSelect(); populateCustomerSelect(); populateClientSelect();
+    await renderDashboard();
+    await renderCalls();
+    await renderAgents();
+    await renderCustomers();
+    await renderClients();
+}
+
+// ==================== CHARTS ====================
+function renderDashboardCharts(calls) {
+    if (!document.getElementById('dashboard').classList.contains('active')) return;
+    var canvasHour = document.getElementById('callsByHourChart');
+    var canvasOutcome = document.getElementById('outcomeChart');
+    if (!canvasHour || !canvasOutcome) return;
+
+    var hours = Array(24).fill(0);
+    calls.forEach(function(c) {
+        if (c.datetime) {
+            var h = new Date(c.datetime).getHours();
+            if (!isNaN(h)) hours[h]++;
+        }
+    });
+
+    if (charts.hour) {
+        charts.hour.data.datasets[0].data = hours;
+        charts.hour.update('none');
+    } else {
+        charts.hour = new Chart(canvasHour, {
+            type: 'bar',
+            data: { labels: Array.from({length: 24}, function(_, i) { return i + ':00'; }), datasets: [{ label: 'Calls', data: hours, backgroundColor: 'rgba(167,67,255,0.7)', borderRadius: 6, borderSkipped: false }] },
+            options: { responsive: true, maintainAspectRatio: false, plugins: { legend: { display: false } }, scales: { y: { beginAtZero: true, ticks: { stepSize: 1 }, grid: { color: 'rgba(167,67,255,0.05)' } }, x: { grid: { display: false } } } }
+        });
+    }
+
+    var outcomes = {};
+    calls.forEach(function(c) { if (c.outcome) outcomes[c.outcome] = (outcomes[c.outcome] || 0) + 1; });
+    var outcomeLabels = Object.keys(outcomes);
+    var outcomeData = Object.values(outcomes);
+    if (outcomeLabels.length === 0) { outcomeLabels = ['No Data']; outcomeData = [0]; }
+
+    if (charts.outcome) {
+        charts.outcome.data.labels = outcomeLabels;
+        charts.outcome.data.datasets[0].data = outcomeData;
+        charts.outcome.update('none');
+    } else {
+        charts.outcome = new Chart(canvasOutcome, {
+            type: 'doughnut',
+            data: { labels: outcomeLabels, datasets: [{ data: outcomeData, backgroundColor: CONFIG.CHART_COLORS }] },
+            options: { responsive: true, maintainAspectRatio: false, plugins: { legend: { position: 'right' } } }
+        });
+    }
+}
+
+function renderPerformanceCharts() {
+    var calls = STATE.data.calls || [];
+    var canvasDaily = document.getElementById('dailyVolumeChart');
+    var canvasPie = document.getElementById('outcomePieChart');
+    if (!canvasDaily || !canvasPie) return;
+
+    var days = [], dayCounts = [];
+    for (var i = 6; i >= 0; i--) {
+        var d = new Date(); d.setDate(d.getDate() - i);
+        var str = d.getFullYear() + '-' + String(d.getMonth()+1).padStart(2,'0') + '-' + String(d.getDate()).padStart(2,'0');
+        days.push(d.toLocaleDateString('en-GB', { weekday: 'short', day: 'numeric' }));
+        dayCounts.push(calls.filter(function(c) { return c.datetime && c.datetime.startsWith(str); }).length);
+    }
+
+    if (charts.daily) {
+        charts.daily.data.labels = days;
+        charts.daily.data.datasets[0].data = dayCounts;
+        charts.daily.update('none');
+    } else {
+        charts.daily = new Chart(canvasDaily, {
+            type: 'line',
+            data: { labels: days, datasets: [{ label: 'Calls', data: dayCounts, borderColor: '#a743ff', backgroundColor: 'rgba(167,67,255,0.1)', fill: true, tension: 0.4 }] },
+            options: { responsive: true, maintainAspectRatio: false, plugins: { legend: { display: false } }, scales: { y: { beginAtZero: true } } }
+        });
+    }
+
+    var outcomes = {};
+    calls.forEach(function(c) { if (c.outcome) outcomes[c.outcome] = (outcomes[c.outcome] || 0) + 1; });
+    var pieLabels = Object.keys(outcomes);
+    var pieData = Object.values(outcomes);
+    if (pieLabels.length === 0) { pieLabels = ['No Data']; pieData = [0]; }
+
+    if (charts.pie) {
+        charts.pie.data.labels = pieLabels;
+        charts.pie.data.datasets[0].data = pieData;
+        charts.pie.update('none');
+    } else {
+        charts.pie = new Chart(canvasPie, {
+            type: 'pie',
+            data: { labels: pieLabels, datasets: [{ data: pieData, backgroundColor: CONFIG.CHART_COLORS }] },
+            options: { responsive: true, maintainAspectRatio: false }
+        });
+    }
+}
+
+function renderTrendsChart() {
+    var calls = STATE.data.calls || [];
+    var canvas = document.getElementById('ahtTrendChart');
+    if (!canvas) return;
+
+    var last14 = [];
+    for (var i = 13; i >= 0; i--) {
+        var d = new Date(); d.setDate(d.getDate() - i);
+        var str = d.getFullYear() + '-' + String(d.getMonth()+1).padStart(2,'0') + '-' + String(d.getDate()).padStart(2,'0');
+        var dayCalls = calls.filter(function(c) { return c.datetime && c.datetime.startsWith(str); });
+        var avg = dayCalls.length ? (dayCalls.reduce(function(s, c) { return s + (c.duration || 0); }, 0) / dayCalls.length) : 0;
+        last14.push({ label: d.toLocaleDateString('en-GB', { day: 'numeric', month: 'short' }), avg: avg });
+    }
+    var labels = last14.map(function(d) { return d.label; });
+    var data = last14.map(function(d) { return d.avg.toFixed(1); });
+
+    if (charts.trend) {
+        charts.trend.data.labels = labels;
+        charts.trend.data.datasets[0].data = data;
+        charts.trend.update('none');
+    } else {
+        charts.trend = new Chart(canvas, {
+            type: 'line',
+            data: { labels: labels, datasets: [{ label: 'Avg Handle Time (mins)', data: data, borderColor: '#f59e0b', backgroundColor: 'rgba(245,158,11,0.1)', fill: true, tension: 0.4 }] },
+            options: { responsive: true, maintainAspectRatio: false, plugins: { legend: { display: false } }, scales: { y: { beginAtZero: true } } }
+        });
+    }
+}
+
+function renderAgentRankings() {
+    var agents = STATE.data.agents || [];
+    var calls = STATE.data.calls || [];
+    var ranked = agents.map(function(a) {
+        var stats = getAgentStats(a.id);
+        var score = stats.total ? Math.round((stats.resolutionRate * 40) + (stats.csat * 20) + (Math.min(stats.total, 50)) - (stats.avgDuration * 2)) : 0;
+        return { name: a.name || 'Unknown', id: a.id, total: stats.total, resolutionRate: stats.resolutionRate, avgDuration: stats.avgDuration, csat: stats.csat, score: score };
+    }).sort(function(a, b) { return b.score - a.score; });
+
+    var rankTable = document.getElementById('agent-rank-table');
+    var rankCards = document.getElementById('agent-rank-cards');
+    if (rankTable) {
+        rankTable.innerHTML = ranked.map(function(a, i) {
+            var color = i < 3 ? '#f59e0b' : 'var(--text-light)';
+            return '<tr><td><span style="font-weight:700;font-size:18px;color:' + color + '">#' + (i + 1) + '</span></td><td><span class="agent-avatar">' + getAgentInitials(a.name) + '</span>' + escapeHtml(a.name) + '</td><td>' + a.total + '</td><td>' + Math.round(a.resolutionRate * 100) + '%</td><td>' + formatDuration(a.avgDuration) + '</td><td>' + (a.csat ? a.csat.toFixed(1) : '-') + '</td><td><strong>' + a.score + '</strong></td></tr>';
+        }).join('') || '<tr><td colspan="7" style="text-align:center;padding:40px;color:var(--text-light)">No data yet</td></tr>';
+    }
+    if (rankCards) {
+        rankCards.innerHTML = ranked.map(function(a, i) {
+            var color = i < 3 ? '#f59e0b' : 'var(--text-light)';
+            return '<div class="card-list-item"><div class="title"><span style="font-weight:700;font-size:20px;color:' + color + ';margin-right:8px">#' + (i + 1) + '</span><span class="agent-avatar">' + getAgentInitials(a.name) + '</span>' + escapeHtml(a.name) + '</div><div class="row"><span class="label">Calls</span><span class="value"><strong>' + a.total + '</strong></span></div><div class="row"><span class="label">Resolution</span><span class="value">' + Math.round(a.resolutionRate * 100) + '%</span></div><div class="row"><span class="label">Avg Time</span><span class="value">' + formatDuration(a.avgDuration) + '</span></div><div class="row"><span class="label">QA Score</span><span class="value">' + (a.csat ? a.csat.toFixed(1) : '-') + '</span></div><div class="row"><span class="label">Score</span><span class="value"><strong>' + a.score + '</strong></span></div></div>';
+        }).join('') || '<div class="empty-state" style="padding:40px"><p>No data yet</p></div>';
+    }
+}
+
+
+function showClientExportStep() {
+    document.getElementById('export-options-main').style.display = 'none';
+    document.getElementById('export-client-step').style.display = 'block';
+    var select = document.getElementById('export-client-select');
+    var clients = buildClientData();
+    select.innerHTML = '<option value="">All Clients</option>' + clients.map(function(c) {
+        return '<option value="' + escapeHtml(c.name) + '">' + escapeHtml(c.name) + ' (' + c.totalCalls + ' calls)</option>';
+    }).join('');
+}
+
+function backToExportMain() {
+    document.getElementById('export-options-main').style.display = 'grid';
+    document.getElementById('export-client-step').style.display = 'none';
+}
+
+function exportClientData() {
+    var clientName = document.getElementById('export-client-select').value;
+    closeModal('export');
+    backToExportMain();
+    var extra = clientName ? { clientName: clientName } : null;
+    var filename = 'zynlo_clients_' + (clientName ? clientName.replace(/\s+/g, '_') : 'all') + '_' + new Date().toISOString().split('T')[0];
+
+    var csv = 'Company,Contact Name,Phone,Email,Total Calls,Resolved,Escalated,Avg Duration,QA Score,Last Contact,Notes\n';
+    var clients = buildClientData();
+    var hasData = false;
+    clients.forEach(function(client) {
+        if (clientName && client.name !== clientName) return;
+        client.contacts.forEach(function(contact) {
+            hasData = true;
+            var cStats = contact.stats;
+            var customer = getCustomer(contact.id);
+            csv += [client.name, contact.name, contact.phone, contact.email || '', cStats.total, cStats.resolved, cStats.escalated, formatDuration(cStats.avgDuration), cStats.qaScore ? cStats.qaScore.toFixed(1) : '', cStats.lastContact ? formatDate(cStats.lastContact) : '', cStats.callNotes || ''].map(escapeCsv).join(',') + '\n';
+        });
+    });
+
+    if (!hasData) {
+        toast('No data found for selected client', 'warning');
+        return;
+    }
+
+    var blob = new Blob([csv], { type: 'text/csv;charset=utf-8;' });
+    downloadBlob(blob, filename + '.csv');
+    toast('Client data exported to CSV', 'success');
+}
+
+// ==================== CLIENT CRUD ====================
+async function saveClient(e) {
+    e.preventDefault();
+    var id = document.getElementById('client-id').value || uid();
+    var clients = (STATE.data.clients || []).slice();
+    var idx = clients.findIndex(function(c) { return c.id === id; });
+    var client = {
+        id: id,
+        name: document.getElementById('client-name').value,
+        industry: document.getElementById('client-industry').value,
+        phone: document.getElementById('client-phone').value,
+        email: document.getElementById('client-email').value,
+        website: document.getElementById('client-website').value,
+        status: document.getElementById('client-status').value,
+        address: document.getElementById('client-address').value,
+        notes: document.getElementById('client-notes').value
+    };
+    if (idx >= 0) clients[idx] = client; else clients.push(client);
+    STATE.data.clients = clients;
+    invalidateCache();
+    await DB.saveCollection('clients');
+    closeModal('client');
+    await renderClients();
+    populateClientSelect();
+    toast('Client saved successfully', 'success');
+}
+
+async function deleteClient(id) {
+    var confirmed = await confirmAction({
+        title: 'Delete Client?',
+        message: 'This client will be permanently removed.',
+        icon: '🏢',
+        danger: true
+    });
+    if (!confirmed) return;
+    STATE.data.clients = (STATE.data.clients || []).filter(function(c) { return c.id !== id; });
+    invalidateCache();
+    await DB.saveCollection('clients');
+    await renderClients();
+    populateClientSelect();
+    toast('Client deleted', 'success');
+}
+
+// ==================== DEMO DATA ====================
+async function loadDemoData() {
+    var confirmed = await confirmAction({
+        title: 'Load Demo Data?',
+        message: 'This will replace all current data with demo data.',
+        icon: '\uD83C\uDFB2',
+        danger: true
+    });
+    if (!confirmed) return;
+
+    showSync('syncing', 'Loading demo data...');
+    var demoAgents = [
+        { id: uid(), name: 'Sarah Johnson', email: 'sarah.j@company.com', role: 'Senior Agent', status: 'Active' },
+        { id: uid(), name: 'Mike Chen', email: 'mike.c@company.com', role: 'Agent', status: 'Active' },
+        { id: uid(), name: 'Emma Williams', email: 'emma.w@company.com', role: 'Team Lead', status: 'Active' },
+        { id: uid(), name: 'David Brown', email: 'david.b@company.com', role: 'Agent', status: 'Away' }
+    ];
+    var demoCustomers = [
+        { id: uid(), name: 'Acme Corp', phone: '+1-555-0101', email: 'support@acme.com', company: 'Acme Corp', notes: 'Enterprise client' },
+        { id: uid(), name: 'Jane Smith', phone: '+1-555-0102', email: 'jane@email.com', company: '', notes: 'Frequent caller' },
+        { id: uid(), name: 'TechStart Inc', phone: '+1-555-0103', email: 'hello@techstart.io', company: 'TechStart Inc', notes: 'New prospect' },
+        { id: uid(), name: 'Robert Taylor', phone: '+1-555-0104', email: 'robert.t@outlook.com', company: '', notes: '' },
+        { id: uid(), name: 'Global Services Ltd', phone: '+1-555-0105', email: 'info@globalservices.com', company: 'Global Services Ltd', notes: 'VIP account' }
+    ];
+    var outcomes = ['Resolved', 'Resolved', 'Resolved', 'Escalated', 'Follow-up', 'No Answer', 'Voicemail'];
+    var types = ['Inbound', 'Inbound', 'Inbound', 'Outbound', 'Callback'];
+    var demoCalls = [];
+    for (var i = 0; i < 30; i++) {
+        var d = new Date();
+        d.setDate(d.getDate() - Math.floor(Math.random() * 7));
+        d.setHours(Math.floor(Math.random() * 10) + 8, Math.floor(Math.random() * 60));
+        demoCalls.push({
+            id: uid(), datetime: d.toISOString().slice(0, 16),
+            agentId: demoAgents[Math.floor(Math.random() * demoAgents.length)].id,
+            customerId: demoCustomers[Math.floor(Math.random() * demoCustomers.length)].id,
+            type: types[Math.floor(Math.random() * types.length)],
+            duration: parseFloat((Math.random() * 15 + 1).toFixed(1)),
+            outcome: outcomes[Math.floor(Math.random() * outcomes.length)],
+            rating: Math.random() > 0.3 ? Math.floor(Math.random() * 3) + 3 : null,
+            notes: 'Demo call entry'
+        });
+    }
+    var demoClients = [
+        { id: uid(), name: 'Acme Corp', industry: 'Manufacturing', status: 'Active', notes: 'Enterprise client' },
+        { id: uid(), name: 'TechStart Inc', industry: 'Technology', status: 'Active', notes: 'New prospect' },
+        { id: uid(), name: 'Global Services Ltd', industry: 'Consulting', status: 'Active', notes: 'VIP account' }
+    ];
+    for (var i = 0; i < demoCalls.length; i++) {
+        var cust = demoCustomers.find(function(c) { return c.id === demoCalls[i].customerId; });
+        if (cust && cust.name === 'Acme Corp') demoCalls[i].client = 'Acme Corp';
+        else if (cust && cust.name === 'TechStart Inc') demoCalls[i].client = 'TechStart Inc';
+        else if (cust && cust.name === 'Global Services Ltd') demoCalls[i].client = 'Global Services Ltd';
+        else demoCalls[i].client = demoClients[Math.floor(Math.random() * demoClients.length)].name;
+    }
+    STATE.data = { agents: demoAgents, customers: demoCustomers, calls: demoCalls, clients: demoClients };
+    invalidateCache();
+    if (STATE.connected) {
+        await DB.put('agents', demoAgents);
+        await DB.put('customers', demoCustomers);
+        await DB.put('calls', demoCalls);
+        await DB.put('clients', demoClients);
+    }
+    saveLocal();
+    await refreshUI();
+    showSync('success', 'Demo data loaded!');
+    setTimeout(hideSync, 2000);
+    toast('Demo data loaded successfully', 'success');
+}
+
+// ==================== INIT ====================
+document.addEventListener('DOMContentLoaded', async function() {
+    loadLocal();
+    updateCloudUI();
+
+    var hashUrl = loadUrlFromHash();
+    if (hashUrl) {
+        var urlInput = document.getElementById('firebase-url');
+        if (urlInput) urlInput.value = hashUrl;
+        try {
+            await DB.connect(hashUrl);
+            showSync('success', 'Auto-connected!');
+            setTimeout(hideSync, 2000);
+        } catch (e) { console.warn('Poll sync failed:', e); }
+    }
+
+    populateAgentSelect(); populateCustomerSelect(); populateClientSelect();
+    try {
+        await renderDashboard();
+        await renderCalls();
+        await renderAgents();
+        await renderCustomers();
+        await renderClients();
+    } catch (e) {
+        console.warn('Initial render error:', e);
+    }
+});
+
+document.querySelectorAll('.modal-overlay').forEach(function(overlay) {
+    overlay.addEventListener('click', function(e) {
+        if (e.target === overlay) {
+            if (overlay.id === 'modal-confirm') {
+                closeConfirmModal();
+            } else {
+                overlay.classList.remove('active');
+            }
+        }
+    });
+});
+</script>
+    <div class="modal-overlay" id="modal-client">
+        <div class="modal">
+            <div class="modal-header">
+                <h2 id="client-modal-title">Add Client</h2>
+                <button class="modal-close" onclick="closeModal('client')">×</button>
+            </div>
+            <div class="modal-body">
+                <form id="client-form" onsubmit="saveClient(event)">
+                    <input type="hidden" id="client-id">
+                    <div class="form-grid">
+                        <div class="form-group"><label>Company Name *</label><input type="text" id="client-name" required></div>
+                        <div class="form-group"><label>Industry</label><input type="text" id="client-industry"></div>
+                        <div class="form-group"><label>Phone</label><input type="tel" id="client-phone"></div>
+                        <div class="form-group"><label>Email</label><input type="email" id="client-email"></div>
+                        <div class="form-group"><label>Website</label><input type="url" id="client-website"></div>
+                        <div class="form-group"><label>Status</label>
+                            <select id="client-status">
+                                <option value="Active">Active</option>
+                                <option value="Inactive">Inactive</option>
+                                <option value="Prospect">Prospect</option>
+                            </select>
+                        </div>
+                    </div>
+                    <div class="form-group" style="margin-top:16px">
+                        <label>Address</label>
+                        <textarea id="client-address"></textarea>
+                    </div>
+                    <div class="form-group" style="margin-top:16px">
+                        <label>Notes</label>
+                        <textarea id="client-notes"></textarea>
+                    </div>
+                    <div class="modal-footer">
+                        <button type="button" class="btn btn-secondary" onclick="closeModal('client')">Cancel</button>
+                        <button type="submit" class="btn btn-primary">Save Client</button>
+                    </div>
+                </form>
+            </div>
+        </div>
+    </div>
+</body>
+</html>
