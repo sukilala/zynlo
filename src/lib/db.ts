@@ -16,6 +16,22 @@ const databaseUrl =
  */
 export const dbSource: DbSource = databaseUrl ? "neon" : "pglite";
 
+/** True when a real cloud Postgres (Neon) is configured. */
+export const isCloudDatabase = dbSource === "neon";
+
+export function storageLabel(): string {
+  return dbSource === "neon"
+    ? "Cloud Postgres (Neon)"
+    : "Preview storage (local durable)";
+}
+
+if (typeof process !== "undefined" && process.env.VERCEL && !databaseUrl) {
+  console.warn(
+    "[db] VERCEL=1 but DATABASE_URL is unset — falling back to PGLite. " +
+      "Cloud persistence requires the platform-injected Neon DATABASE_URL.",
+  );
+}
+
 /**
  * Minimal shared SQL surface, satisfied by both Neon and PGLite. Both the
  * tagged-template and `.query()` forms resolve to an array of row objects:
@@ -83,15 +99,70 @@ function toSql(run: Run): Sql {
   return sql;
 }
 
+async function applyNeonMigrations(pool: import("pg").Pool): Promise<void> {
+  const client = await pool.connect();
+  try {
+    await client.query(
+      "CREATE TABLE IF NOT EXISTS _migrations (name TEXT PRIMARY KEY, applied_at TIMESTAMPTZ NOT NULL DEFAULT now())",
+    );
+    const applied = new Set(
+      (await client.query("SELECT name FROM _migrations")).rows.map(
+        (r: { name: string }) => r.name,
+      ),
+    );
+    const { readdir, readFile } = await import("node:fs/promises");
+    const { join } = await import("node:path");
+    const dir = join(process.cwd(), "migrations");
+    let files: string[] = [];
+    try {
+      files = (await readdir(dir)).filter((f) => f.endsWith(".sql")).sort();
+    } catch {
+      return;
+    }
+    for (const name of files) {
+      if (applied.has(name)) continue;
+      const text = await readFile(join(dir, name), "utf8");
+      await client.query("BEGIN");
+      try {
+        await client.query(text);
+        await client.query("INSERT INTO _migrations (name) VALUES ($1)", [name]);
+        await client.query("COMMIT");
+        console.log("[db] Neon migration applied:", name);
+      } catch (err) {
+        await client.query("ROLLBACK");
+        throw err;
+      }
+    }
+  } finally {
+    client.release();
+  }
+}
+
 function createNeonSql(): Promise<Sql> {
   globalRef.__pgSqlPromise__ ??= (async () => {
-    // Regular Postgres driver: node-postgres (`pg`) — works directly with Neon's
-    // pooled endpoint. One pool per process; warm serverless instances reuse it.
+    // Neon serverless Postgres via node-postgres. One pool per warm instance.
     const { Pool, types } = await import("pg");
     types.setTypeParser(OID_INT8, Number);
     types.setTypeParser(OID_DATE, identity);
     types.setTypeParser(OID_INTERVAL, identity);
-    const pool = new Pool({ connectionString: databaseUrl });
+
+    // Neon requires SSL; pooled endpoints work best with a small pool.
+    const pool = new Pool({
+      connectionString: databaseUrl,
+      max: 5,
+      idleTimeoutMillis: 10_000,
+      connectionTimeoutMillis: 15_000,
+      ssl:
+        databaseUrl!.includes("sslmode=disable")
+          ? undefined
+          : { rejectUnauthorized: false },
+    });
+
+    // Verify cloud connection and apply any pending migrations at first use.
+    await pool.query("select 1");
+    console.log("[db] Connected to Neon cloud Postgres");
+    await applyNeonMigrations(pool);
+
     return toSql(async <T>(text: string, params: unknown[]) => {
       const res = await pool.query(text, params);
       return res.rows as T[];
@@ -168,10 +239,13 @@ async function loadPgliteBundles(): Promise<{
   return { fsBundle, pgliteWasmModule, initdbWasmModule };
 }
 
+/**
+ * PGlite runs in-memory under Vite SSR (NodeFS init is unreliable in the
+ * bundler). Durable storage for app data is handled by
+ * `src/lib/zynlo/persist.ts` which snapshots to `data/zynlo-snapshot.json`
+ * after every mutation and restores on boot when the DB is empty.
+ */
 async function createPgliteSql(): Promise<Sql> {
-  // Embedded Postgres, imported on demand so it never loads on the Neon path.
-  // One in-memory instance per process, shared across HMR module instances, so
-  // data survives source edits (it resets on dev-server restart).
   globalRef.__pgliteInstance__ ??= (async () => {
     const { PGlite } = await import("@electric-sql/pglite");
     const bundles = await loadPgliteBundles();
@@ -196,6 +270,7 @@ async function createPgliteSql(): Promise<Sql> {
     throw err;
   });
   const pg = await globalRef.__pgliteInstance__;
+
 
   // Apply migrations/ (the single schema source) so preview matches production.
   // SQL is inlined by the bundler via import.meta.glob (no runtime fs); applied

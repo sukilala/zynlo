@@ -214,7 +214,6 @@ export function ZynloApp({ initial }: { initial: ZynloData }) {
     email: "",
     company: "",
     clientId: "",
-    notes: "",
   });
   const [clientForm, setClientForm] = useState({
     name: "",
@@ -429,16 +428,17 @@ export function ZynloApp({ initial }: { initial: ZynloData }) {
       const clientName = c.clientId
         ? clientsById[c.clientId]?.name || ""
         : "";
+      const activityNotes = getCustomerStats(data, c.id).activityNotes || "";
       return (
         c.name.toLowerCase().includes(q) ||
         c.phone.includes(q) ||
         c.email.toLowerCase().includes(q) ||
         c.company.toLowerCase().includes(q) ||
         clientName.toLowerCase().includes(q) ||
-        (c.notes || "").toLowerCase().includes(q)
+        activityNotes.toLowerCase().includes(q)
       );
     });
-  }, [data.customers, customerSearch, clientsById]);
+  }, [data, customerSearch, clientsById]);
 
   const filteredClients = useMemo(() => {
     const q = clientSearch.toLowerCase().trim();
@@ -542,7 +542,6 @@ export function ZynloApp({ initial }: { initial: ZynloData }) {
             email: c.email,
             company: c.company,
             clientId: c.clientId || "",
-            notes: c.notes,
           });
       } else {
         setCustomerForm({
@@ -551,7 +550,6 @@ export function ZynloApp({ initial }: { initial: ZynloData }) {
           email: "",
           company: "",
           clientId: "",
-          notes: "",
         });
       }
     }
@@ -588,7 +586,7 @@ export function ZynloApp({ initial }: { initial: ZynloData }) {
   async function onSaveCall(e: React.FormEvent) {
     e.preventDefault();
     if (!callForm.agentId || !callForm.customerId) {
-      toast("Add an agent and customer first");
+      toast("Add agent and customer first");
       return;
     }
     setBusy(true);
@@ -626,7 +624,7 @@ export function ZynloApp({ initial }: { initial: ZynloData }) {
   async function onSaveMessage(e: React.FormEvent) {
     e.preventDefault();
     if (!msgForm.agentId || !msgForm.customerId) {
-      toast("Add an agent and customer first");
+      toast("Add agent and customer first");
       return;
     }
     if (!msgForm.body.trim()) {
@@ -706,7 +704,7 @@ export function ZynloApp({ initial }: { initial: ZynloData }) {
           email: customerForm.email,
           company,
           clientId,
-          notes: customerForm.notes,
+          notes: "",
         },
       });
       await refresh();
@@ -850,7 +848,7 @@ export function ZynloApp({ initial }: { initial: ZynloData }) {
             c.company,
             s.total,
             s.messages,
-            c.notes,
+            s.activityNotes,
             s.lastContact ? formatDate(s.lastContact) : "",
           ]
             .map(escapeCsv)
@@ -966,17 +964,6 @@ export function ZynloApp({ initial }: { initial: ZynloData }) {
             );
           })}
         </nav>
-
-        <div className="mt-4 space-y-1 border-t border-white/10 px-2 pt-4 text-[10px] leading-relaxed text-white/35">
-          <div>
-            <span className="font-semibold text-white/50">Customers</span> —
-            people / contacts
-          </div>
-          <div>
-            <span className="font-semibold text-white/50">Clients</span> —
-            company accounts
-          </div>
-        </div>
       </aside>
 
       <main className="min-w-0 flex-1 px-4 py-4 pt-16 md:ml-[260px] md:px-8 md:py-6 md:pt-6">
@@ -1010,7 +997,6 @@ export function ZynloApp({ initial }: { initial: ZynloData }) {
                 icon={<ClipboardList className="h-5 w-5" />}
                 label="Avg Handle Time"
                 value={formatDuration(kpis.aht)}
-                sub="Target: under 5m"
               />
               <Kpi
                 icon={<Star className="h-5 w-5" />}
@@ -1092,7 +1078,7 @@ export function ZynloApp({ initial }: { initial: ZynloData }) {
                   customers={customersById}
                   onEdit={(id) => openModal("call", id)}
                   onDelete={(id) =>
-                    askDelete("Delete Call?", "This call will be removed.", () =>
+                    askDelete("Delete Call?", "Delete this call?", () =>
                       deleteCall({ data: { id } }).then(() => undefined),
                     )
                   }
@@ -1114,7 +1100,7 @@ export function ZynloApp({ initial }: { initial: ZynloData }) {
                 />
                 {recentMsgs.length === 0 ? (
                   <div className="px-6 py-10 text-center text-sm text-muted">
-                    No messages yet — log SMS, chat, or email conversations.
+                    No messages yet.
                   </div>
                 ) : (
                   <div className="divide-y divide-border">
@@ -1135,7 +1121,7 @@ export function ZynloApp({ initial }: { initial: ZynloData }) {
                           </span>
                         </div>
                         <div className="line-clamp-2 text-xs text-muted">
-                          {m.subject ? `${m.subject} — ` : ""}
+                          {m.subject ? `${m.subject}: ` : ""}
                           {m.body}
                         </div>
                         {m.notes ? (
@@ -1164,7 +1150,7 @@ export function ZynloApp({ initial }: { initial: ZynloData }) {
               <SearchBox
                 value={callSearch}
                 onChange={setCallSearch}
-                placeholder="Search calls, notes..."
+                placeholder="Search..."
               />
               <select
                 className={inputClass + " w-auto min-w-[140px]"}
@@ -1196,7 +1182,7 @@ export function ZynloApp({ initial }: { initial: ZynloData }) {
                 <EmptyState
                   icon={<Phone className="h-12 w-12" />}
                   title="No calls yet"
-                  description="Log your first call to start tracking. Call notes appear in the Notes column."
+                  description="Log your first call to get started."
                 />
               ) : (
                 <CallsTable
@@ -1207,7 +1193,7 @@ export function ZynloApp({ initial }: { initial: ZynloData }) {
                   onDelete={(id) =>
                     askDelete(
                       "Delete Call?",
-                      "This call will be removed.",
+                      "Delete this call?",
                       () =>
                         deleteCall({ data: { id } }).then(() => undefined),
                     )
@@ -1226,15 +1212,11 @@ export function ZynloApp({ initial }: { initial: ZynloData }) {
               primaryLabel="Log Message"
               onPrimary={() => openModal("message")}
             />
-            <p className="text-sm text-muted">
-              Log SMS, WhatsApp, email, chat, and social conversations — separate
-              from phone calls.
-            </p>
             <Toolbar>
               <SearchBox
                 value={msgSearch}
                 onChange={setMsgSearch}
-                placeholder="Search messages, subjects, notes..."
+                placeholder="Search..."
               />
               <select
                 className={inputClass + " w-auto min-w-[130px]"}
@@ -1266,7 +1248,7 @@ export function ZynloApp({ initial }: { initial: ZynloData }) {
                 <EmptyState
                   icon={<MessageSquare className="h-12 w-12" />}
                   title="No messages yet"
-                  description="Log message-based conversations (SMS, chat, email). Internal notes show next to each message."
+                  description="Log SMS, chat, or email conversations."
                 />
               ) : (
                 <>
@@ -1303,9 +1285,9 @@ export function ZynloApp({ initial }: { initial: ZynloData }) {
                               <td className="px-4 py-3 text-xs">
                                 {m.direction}
                               </td>
-                              <td className="px-4 py-3">{a?.name || "—"}</td>
+                              <td className="px-4 py-3">{a?.name || "-"}</td>
                               <td className="px-4 py-3 font-medium">
-                                {cu?.name || "—"}
+                                {cu?.name || "-"}
                               </td>
                               <td className="max-w-[220px] px-4 py-3">
                                 {m.subject ? (
@@ -1334,7 +1316,7 @@ export function ZynloApp({ initial }: { initial: ZynloData }) {
                                   onDelete={() =>
                                     askDelete(
                                       "Delete Message?",
-                                      "This message log will be removed.",
+                                      "Delete this message?",
                                       () =>
                                         deleteMessage({
                                           data: { id: m.id },
@@ -1360,7 +1342,7 @@ export function ZynloApp({ initial }: { initial: ZynloData }) {
                           subtitle={`${m.channel} · ${formatDate(m.datetime)}`}
                           rows={[
                             ["Direction", m.direction],
-                            ["Agent", a?.name || "—"],
+                            ["Agent", a?.name || "-"],
                             ["Message", shortNotes(m.body, 80)],
                             ["Status", m.status],
                             ["Notes", shortNotes(m.notes, 80)],
@@ -1369,7 +1351,7 @@ export function ZynloApp({ initial }: { initial: ZynloData }) {
                           onDelete={() =>
                             askDelete(
                               "Delete Message?",
-                              "This message log will be removed.",
+                              "Delete this message?",
                               () =>
                                 deleteMessage({ data: { id: m.id } }).then(
                                   () => undefined,
@@ -1399,7 +1381,7 @@ export function ZynloApp({ initial }: { initial: ZynloData }) {
                 <EmptyState
                   icon={<Users className="h-12 w-12" />}
                   title="No agents yet"
-                  description="Add agents who handle calls and messages."
+                  description="Add your first agent."
                 />
               ) : (
                 <>
@@ -1435,7 +1417,7 @@ export function ZynloApp({ initial }: { initial: ZynloData }) {
                                   <div>
                                     <div className="font-semibold">{a.name}</div>
                                     <div className="text-xs text-muted">
-                                      {a.email || "—"}
+                                      {a.email || "-"}
                                     </div>
                                   </div>
                                 </div>
@@ -1465,7 +1447,7 @@ export function ZynloApp({ initial }: { initial: ZynloData }) {
                                     ★ {s.csat.toFixed(1)}
                                   </span>
                                 ) : (
-                                  "—"
+                                  "-"
                                 )}
                               </td>
                               <td className="px-4 py-3">
@@ -1483,7 +1465,7 @@ export function ZynloApp({ initial }: { initial: ZynloData }) {
                                   onDelete={() =>
                                     askDelete(
                                       "Delete Agent?",
-                                      "This agent and related records will be removed.",
+                                      "Delete this agent?",
                                       () =>
                                         deleteAgent({
                                           data: { id: a.id },
@@ -1519,7 +1501,7 @@ export function ZynloApp({ initial }: { initial: ZynloData }) {
                           onDelete={() =>
                             askDelete(
                               "Delete Agent?",
-                              "This agent and related records will be removed.",
+                              "Delete this agent?",
                               () =>
                                 deleteAgent({ data: { id: a.id } }).then(
                                   () => undefined,
@@ -1544,24 +1526,11 @@ export function ZynloApp({ initial }: { initial: ZynloData }) {
               primaryLabel="Add Customer"
               onPrimary={() => openModal("customer")}
             />
-            <p className="text-sm text-muted">
-              Individual people who contact you. Link them to a{" "}
-              <button
-                type="button"
-                className="font-semibold text-primary underline-offset-2 hover:underline"
-                onClick={() => go("clients")}
-              >
-                Client
-              </button>{" "}
-              (company) when they belong to an account.{" "}
-              <span className="font-medium text-fg">Notes</span> are permanent
-              profile notes shown in the table.
-            </p>
             <Toolbar>
               <SearchBox
                 value={customerSearch}
                 onChange={setCustomerSearch}
-                placeholder="Search customers, notes..."
+                placeholder="Search..."
               />
             </Toolbar>
             <Card>
@@ -1569,7 +1538,7 @@ export function ZynloApp({ initial }: { initial: ZynloData }) {
                 <EmptyState
                   icon={<UserRound className="h-12 w-12" />}
                   title="No customers yet"
-                  description="Add people who call or message you. Profile notes show in the Notes column."
+                  description="Add your first customer."
                 />
               ) : (
                 <>
@@ -1580,7 +1549,7 @@ export function ZynloApp({ initial }: { initial: ZynloData }) {
                           <th className="px-4 py-3">Name</th>
                           <th className="px-4 py-3">Phone</th>
                           <th className="px-4 py-3">Email</th>
-                          <th className="px-4 py-3">Client (company)</th>
+                          <th className="px-4 py-3">Client</th>
                           <th className="px-4 py-3">Calls</th>
                           <th className="px-4 py-3">Msgs</th>
                           <th className="px-4 py-3">Notes</th>
@@ -1600,7 +1569,7 @@ export function ZynloApp({ initial }: { initial: ZynloData }) {
                                 {c.name}
                               </td>
                               <td className="px-4 py-3">{c.phone}</td>
-                              <td className="px-4 py-3">{c.email || "—"}</td>
+                              <td className="px-4 py-3">{c.email || "-"}</td>
                               <td className="px-4 py-3">
                                 {customerCompanyLabel(c, clientsById)}
                               </td>
@@ -1609,10 +1578,10 @@ export function ZynloApp({ initial }: { initial: ZynloData }) {
                               </td>
                               <td className="px-4 py-3">{s.messages}</td>
                               <td
-                                className="max-w-[160px] truncate px-4 py-3 text-xs text-muted"
-                                title={c.notes || undefined}
+                                className="max-w-[200px] truncate px-4 py-3 text-xs text-muted"
+                                title={s.activityNotes || undefined}
                               >
-                                {shortNotes(c.notes)}
+                                {shortNotes(s.activityNotes)}
                               </td>
                               <td className="px-4 py-3">
                                 {s.lastContact
@@ -1625,7 +1594,7 @@ export function ZynloApp({ initial }: { initial: ZynloData }) {
                                   onDelete={() =>
                                     askDelete(
                                       "Delete Customer?",
-                                      "This customer and their calls/messages will be removed.",
+                                      "Delete this customer?",
                                       () =>
                                         deleteCustomer({
                                           data: { id: c.id },
@@ -1649,14 +1618,14 @@ export function ZynloApp({ initial }: { initial: ZynloData }) {
                           title={c.name}
                           subtitle={c.phone}
                           rows={[
-                            ["Email", c.email || "—"],
+                            ["Email", c.email || "-"],
                             [
                               "Client",
                               customerCompanyLabel(c, clientsById),
                             ],
                             ["Calls", String(s.total)],
                             ["Messages", String(s.messages)],
-                            ["Notes", shortNotes(c.notes, 80)],
+                            ["Notes", shortNotes(s.activityNotes, 80)],
                             [
                               "Last",
                               s.lastContact
@@ -1668,7 +1637,7 @@ export function ZynloApp({ initial }: { initial: ZynloData }) {
                           onDelete={() =>
                             askDelete(
                               "Delete Customer?",
-                              "This customer and their calls/messages will be removed.",
+                              "Delete this customer?",
                               () =>
                                 deleteCustomer({ data: { id: c.id } }).then(
                                   () => undefined,
@@ -1693,24 +1662,11 @@ export function ZynloApp({ initial }: { initial: ZynloData }) {
               primaryLabel="Add Client"
               onPrimary={() => openModal("client")}
             />
-            <p className="text-sm text-muted">
-              Company / B2B accounts — separate from individual{" "}
-              <button
-                type="button"
-                className="font-semibold text-primary underline-offset-2 hover:underline"
-                onClick={() => go("customers")}
-              >
-                Customers
-              </button>
-              . Link contacts to a client from the customer form. Account{" "}
-              <span className="font-medium text-fg">notes</span> show in the
-              table.
-            </p>
             <Toolbar>
               <SearchBox
                 value={clientSearch}
                 onChange={setClientSearch}
-                placeholder="Search clients, notes..."
+                placeholder="Search..."
               />
             </Toolbar>
             <Card>
@@ -1718,7 +1674,7 @@ export function ZynloApp({ initial }: { initial: ZynloData }) {
                 <EmptyState
                   icon={<Building2 className="h-12 w-12" />}
                   title="No clients yet"
-                  description="Add company accounts here. Then link individual customers to a client."
+                  description="Add your first client."
                 />
               ) : (
                 <>
@@ -1727,13 +1683,13 @@ export function ZynloApp({ initial }: { initial: ZynloData }) {
                       <thead>
                         <tr className="bg-purple-50 text-left text-[11px] font-semibold uppercase tracking-wide text-muted">
                           <th className="px-4 py-3">Company</th>
+                          <th className="px-4 py-3">Notes</th>
                           <th className="px-4 py-3">Industry</th>
                           <th className="px-4 py-3">Status</th>
                           <th className="px-4 py-3">Phone</th>
                           <th className="px-4 py-3">Contacts</th>
                           <th className="px-4 py-3">Calls</th>
                           <th className="px-4 py-3">Msgs</th>
-                          <th className="px-4 py-3">Notes</th>
                           <th className="px-4 py-3">Actions</th>
                         </tr>
                       </thead>
@@ -1753,8 +1709,17 @@ export function ZynloApp({ initial }: { initial: ZynloData }) {
                                   </div>
                                 ) : null}
                               </td>
+                              <td className="min-w-[160px] max-w-[280px] px-4 py-3 text-sm">
+                                {c.notes?.trim() ? (
+                                  <span className="line-clamp-3 whitespace-pre-wrap">
+                                    {c.notes}
+                                  </span>
+                                ) : (
+                                  <span className="text-muted">-</span>
+                                )}
+                              </td>
                               <td className="px-4 py-3">
-                                {c.industry || "—"}
+                                {c.industry || "-"}
                               </td>
                               <td className="px-4 py-3">
                                 <Badge
@@ -1765,25 +1730,19 @@ export function ZynloApp({ initial }: { initial: ZynloData }) {
                                   {c.status}
                                 </Badge>
                               </td>
-                              <td className="px-4 py-3">{c.phone || "—"}</td>
+                              <td className="px-4 py-3">{c.phone || "-"}</td>
                               <td className="px-4 py-3 font-semibold">
                                 {s.contacts}
                               </td>
                               <td className="px-4 py-3">{s.calls}</td>
                               <td className="px-4 py-3">{s.messages}</td>
-                              <td
-                                className="max-w-[160px] truncate px-4 py-3 text-xs text-muted"
-                                title={c.notes || undefined}
-                              >
-                                {shortNotes(c.notes)}
-                              </td>
                               <td className="px-4 py-3">
                                 <RowActions
                                   onEdit={() => openModal("client", c.id)}
                                   onDelete={() =>
                                     askDelete(
                                       "Delete Client?",
-                                      "This company account will be removed. Linked customers keep their profiles.",
+                                      "Delete this client?",
                                       () =>
                                         deleteClient({
                                           data: { id: c.id },
@@ -1807,17 +1766,17 @@ export function ZynloApp({ initial }: { initial: ZynloData }) {
                           title={c.name}
                           subtitle={`${c.industry || "Company"} · ${c.status}`}
                           rows={[
-                            ["Phone", c.phone || "—"],
+                            ["Notes", c.notes?.trim() || "-"],
+                            ["Phone", c.phone || "-"],
                             ["Contacts", String(s.contacts)],
                             ["Calls", String(s.calls)],
                             ["Messages", String(s.messages)],
-                            ["Notes", shortNotes(c.notes, 80)],
                           ]}
                           onEdit={() => openModal("client", c.id)}
                           onDelete={() =>
                             askDelete(
                               "Delete Client?",
-                              "This company account will be removed.",
+                              "Delete this client?",
                               () =>
                                 deleteClient({ data: { id: c.id } }).then(
                                   () => undefined,
@@ -1993,7 +1952,7 @@ export function ZynloApp({ initial }: { initial: ZynloData }) {
                               {formatDuration(r.avgDuration)}
                             </td>
                             <td className="px-4 py-3">
-                              {r.csat ? r.csat.toFixed(1) : "—"}
+                              {r.csat ? r.csat.toFixed(1) : "-"}
                             </td>
                             <td className="px-4 py-3 font-bold">{r.score}</td>
                           </tr>
@@ -2028,7 +1987,7 @@ export function ZynloApp({ initial }: { initial: ZynloData }) {
         <form id="call-form" onSubmit={onSaveCall} className="space-y-4">
           {(!data.agents.length || !data.customers.length) && (
             <div className="rounded-[10px] border border-purple-200 bg-purple-50 px-4 py-3 text-sm text-purple-800">
-              Add at least one agent and one customer before logging a call.
+              Add an agent and customer first.
             </div>
           )}
           <div className="grid grid-cols-1 gap-4 sm:grid-cols-2">
@@ -2060,7 +2019,7 @@ export function ZynloApp({ initial }: { initial: ZynloData }) {
                 ))}
               </select>
             </Field>
-            <Field label="Customer (person) *">
+            <Field label="Customer *">
               <select
                 required
                 className={inputClass}
@@ -2083,7 +2042,7 @@ export function ZynloApp({ initial }: { initial: ZynloData }) {
                 ))}
               </select>
             </Field>
-            <Field label="Client (company)">
+            <Field label="Client">
               <select
                 className={inputClass}
                 value={callForm.clientId}
@@ -2139,7 +2098,7 @@ export function ZynloApp({ initial }: { initial: ZynloData }) {
                 ))}
               </select>
             </Field>
-            <Field label="QA Rating (1–5)">
+            <Field label="QA Rating (1-5)">
               <input
                 type="number"
                 min={1}
@@ -2153,14 +2112,14 @@ export function ZynloApp({ initial }: { initial: ZynloData }) {
               />
             </Field>
           </div>
-          <Field label="Call notes (shown in Call Log → Notes column)">
+          <Field label="Notes">
             <textarea
               className={inputClass + " min-h-[80px] resize-y"}
               value={callForm.notes}
               onChange={(e) =>
                 setCallForm((f) => ({ ...f, notes: e.target.value }))
               }
-              placeholder="Call summary, action items…"
+              placeholder="Notes"
             />
           </Field>
         </form>
@@ -2186,7 +2145,7 @@ export function ZynloApp({ initial }: { initial: ZynloData }) {
         <form id="message-form" onSubmit={onSaveMessage} className="space-y-4">
           {(!data.agents.length || !data.customers.length) && (
             <div className="rounded-[10px] border border-purple-200 bg-purple-50 px-4 py-3 text-sm text-purple-800">
-              Add at least one agent and one customer before logging a message.
+              Add an agent and customer first.
             </div>
           )}
           <div className="grid grid-cols-1 gap-4 sm:grid-cols-2">
@@ -2218,7 +2177,7 @@ export function ZynloApp({ initial }: { initial: ZynloData }) {
                 ))}
               </select>
             </Field>
-            <Field label="Customer (person) *">
+            <Field label="Customer *">
               <select
                 required
                 className={inputClass}
@@ -2241,7 +2200,7 @@ export function ZynloApp({ initial }: { initial: ZynloData }) {
                 ))}
               </select>
             </Field>
-            <Field label="Client (company)">
+            <Field label="Client">
               <select
                 className={inputClass}
                 value={msgForm.clientId}
@@ -2296,14 +2255,14 @@ export function ZynloApp({ initial }: { initial: ZynloData }) {
                 ))}
               </select>
             </Field>
-            <Field label="Subject (email / chat topic)">
+            <Field label="Subject">
               <input
                 className={inputClass}
                 value={msgForm.subject}
                 onChange={(e) =>
                   setMsgForm((f) => ({ ...f, subject: e.target.value }))
                 }
-                placeholder="Optional"
+                placeholder=""
               />
             </Field>
           </div>
@@ -2315,17 +2274,17 @@ export function ZynloApp({ initial }: { initial: ZynloData }) {
               onChange={(e) =>
                 setMsgForm((f) => ({ ...f, body: e.target.value }))
               }
-              placeholder="Conversation content…"
+              placeholder="Message"
             />
           </Field>
-          <Field label="Internal notes (shown in Messages → Notes column)">
+          <Field label="Notes">
             <textarea
               className={inputClass + " min-h-[60px] resize-y"}
               value={msgForm.notes}
               onChange={(e) =>
                 setMsgForm((f) => ({ ...f, notes: e.target.value }))
               }
-              placeholder="Private agent notes about this conversation…"
+              placeholder="Notes"
             />
           </Field>
         </form>
@@ -2451,7 +2410,7 @@ export function ZynloApp({ initial }: { initial: ZynloData }) {
               }
             />
           </Field>
-          <Field label="Linked Client (company account)">
+          <Field label="Client">
             <select
               className={inputClass}
               value={customerForm.clientId}
@@ -2459,7 +2418,7 @@ export function ZynloApp({ initial }: { initial: ZynloData }) {
                 setCustomerForm((f) => ({ ...f, clientId: e.target.value }))
               }
             >
-              <option value="">None — individual only</option>
+              <option value="">None</option>
               {data.clients.map((c) => (
                 <option key={c.id} value={c.id}>
                   {c.name}
@@ -2467,24 +2426,14 @@ export function ZynloApp({ initial }: { initial: ZynloData }) {
               ))}
             </select>
           </Field>
-          <Field label="Company label (optional free text)">
+          <Field label="Company">
             <input
               className={inputClass}
               value={customerForm.company}
               onChange={(e) =>
                 setCustomerForm((f) => ({ ...f, company: e.target.value }))
               }
-              placeholder="Used if no Client is linked"
-            />
-          </Field>
-          <Field label="Profile notes (shown in Customers → Notes)" className="sm:col-span-2">
-            <textarea
-              className={inputClass + " min-h-[70px]"}
-              value={customerForm.notes}
-              onChange={(e) =>
-                setCustomerForm((f) => ({ ...f, notes: e.target.value }))
-              }
-              placeholder="Preferences, VIP, history…"
+              placeholder=""
             />
           </Field>
         </form>
@@ -2580,14 +2529,14 @@ export function ZynloApp({ initial }: { initial: ZynloData }) {
               }
             />
           </Field>
-          <Field label="Account notes (shown in Clients → Notes column)">
+          <Field label="Notes">
             <textarea
               className={inputClass + " min-h-[70px]"}
               value={clientForm.notes}
               onChange={(e) =>
                 setClientForm((f) => ({ ...f, notes: e.target.value }))
               }
-              placeholder="Contract terms, SLA, account manager notes…"
+              placeholder="Notes"
             />
           </Field>
         </form>
@@ -2600,12 +2549,12 @@ export function ZynloApp({ initial }: { initial: ZynloData }) {
       >
         <div className="grid gap-3">
           {[
-            ["calls", "Calls (CSV)", "All call records with notes"],
-            ["messages", "Messages (CSV)", "SMS / chat / email logs"],
-            ["agents", "Agents (CSV)", "Agents with performance stats"],
-            ["customers", "Customers (CSV)", "People / contacts with notes"],
-            ["clients", "Clients (CSV)", "Company accounts with notes"],
-            ["json", "Full Backup (JSON)", "Everything as JSON"],
+            ["calls", "Calls (CSV)", "Call log export"],
+            ["messages", "Messages (CSV)", "Message log export"],
+            ["agents", "Agents (CSV)", "Agent export"],
+            ["customers", "Customers (CSV)", "Customer export"],
+            ["clients", "Clients (CSV)", "Client export"],
+            ["json", "Full Backup (JSON)", "Complete backup"],
           ].map(([key, title, desc]) => (
             <button
               key={key}
@@ -2941,7 +2890,7 @@ function CallsTable({
                 ["Agent", a?.name || "Unknown"],
                 ["Duration", formatDuration(c.duration)],
                 ["Outcome", c.outcome],
-                ["QA", c.rating ? `${c.rating}/5` : "—"],
+                ["QA", c.rating ? `${c.rating}/5` : "-"],
                 ["Notes", shortNotes(c.notes, 80)],
               ]}
               onEdit={() => onEdit(c.id)}

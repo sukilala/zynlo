@@ -1,7 +1,7 @@
 import type { Agent, Call, Client, Customer, Message, ZynloData } from "./types";
 
 export function formatDate(d: string | undefined | null): string {
-  if (!d) return "—";
+  if (!d) return "-";
   const date = new Date(d);
   if (isNaN(date.getTime())) return d;
   return date.toLocaleString("en-GB", {
@@ -14,7 +14,7 @@ export function formatDate(d: string | undefined | null): string {
 }
 
 export function formatDuration(mins: number): string {
-  if (!mins && mins !== 0) return "—";
+  if (!mins && mins !== 0) return "-";
   if (mins < 1) return `${Math.round(mins * 60)}s`;
   const m = Math.floor(mins);
   const s = Math.round((mins - m) * 60);
@@ -76,11 +76,11 @@ export function customerCompanyLabel(
   customer: Customer | undefined,
   clients: Record<string, Client>,
 ): string {
-  if (!customer) return "—";
+  if (!customer) return "-";
   if (customer.clientId && clients[customer.clientId]) {
     return clients[customer.clientId].name;
   }
-  return customer.company || "—";
+  return customer.company || "-";
 }
 
 export function getAgentStats(data: ZynloData, agentId: string) {
@@ -141,6 +141,20 @@ export function getCustomerStats(data: ZynloData, customerId: string) {
         ? rated.reduce((s, c) => s + (c.rating || 0), 0) / rated.length
         : 0;
     })(),
+    // Notes only from call log + messages (not free-form customer profile notes)
+    activityNotes: (() => {
+      const items: Array<{ t: string; n: string }> = [];
+      for (const c of custCalls) {
+        if (c.notes?.trim()) items.push({ t: c.datetime, n: c.notes.trim() });
+      }
+      for (const m of custMsgs) {
+        if (m.notes?.trim()) items.push({ t: m.datetime, n: m.notes.trim() });
+      }
+      items.sort(
+        (a, b) => new Date(b.t).getTime() - new Date(a.t).getTime(),
+      );
+      return items.map((x) => x.n).join(" | ");
+    })(),
     callNotes: custCalls
       .filter((c) => c.notes)
       .map((c) => c.notes)
@@ -189,6 +203,6 @@ export function localDatetimeValue(d = new Date()): string {
 /** Truncate long notes for table cells */
 export function shortNotes(text: string, max = 60): string {
   const t = (text || "").trim();
-  if (!t) return "—";
+  if (!t) return "-";
   return t.length > max ? t.slice(0, max - 1) + "…" : t;
 }

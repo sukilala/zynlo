@@ -16,11 +16,11 @@ export const Route = createRootRoute({
         content:
           "width=device-width, initial-scale=1, maximum-scale=1, user-scalable=no",
       },
-      { title: "Zynlo — Call Center CRM" },
+      { title: "Zynlo" },
       {
         name: "description",
         content:
-          "Zynlo call center operations — agents, calls, customers, clients, analytics.",
+          "Zynlo call center operations.",
       },
       { name: "theme-color", content: "#a743ff" },
     ],

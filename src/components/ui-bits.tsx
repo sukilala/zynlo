@@ -214,7 +214,7 @@ export function EmptyState({
 }
 
 export function Stars({ rating }: { rating: number | null | undefined }) {
-  if (!rating) return <span className="text-muted">—</span>;
+  if (!rating) return <span className="text-muted">-</span>;
   return (
     <span className="tracking-wider text-primary" aria-label={`${rating} of 5`}>
       {"★".repeat(rating)}

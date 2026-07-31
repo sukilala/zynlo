@@ -1,0 +1,18 @@
+2026-07-31T08:16:43.507Z dataDir=/workspace/data/pglite
+2026-07-31T08:16:43.969Z FALLBACK Error: PGlite failed to initialize properly
+    at O._t (file:///workspace/node_modules/@electric-sql/pglite/dist/index.js:5:3081)
+    at O.Ye (file:///workspace/node_modules/@electric-sql/pglite/dist/index.js:3:292235)
+    at async eval (/workspace/src/lib/db.ts:182:4)
+    at async createPgliteSql (/workspace/src/lib/db.ts:212:13)
+2026-07-31T08:18:55.931Z dataDir=/workspace/data/pglite
+2026-07-31T08:18:56.435Z FALLBACK Error: PGlite failed to initialize properly
+    at O._t (file:///workspace/node_modules/@electric-sql/pglite/dist/index.js:5:3081)
+    at O.Ye (file:///workspace/node_modules/@electric-sql/pglite/dist/index.js:3:292235)
+    at async eval (/workspace/src/lib/db.ts:182:4)
+    at async createPgliteSql (/workspace/src/lib/db.ts:212:13)
+2026-07-31T08:19:00.278Z dataDir=/workspace/data/pglite
+2026-07-31T08:19:00.844Z FALLBACK Error: PGlite failed to initialize properly
+    at O._t (file:///workspace/node_modules/@electric-sql/pglite/dist/index.js:5:3081)
+    at O.Ye (file:///workspace/node_modules/@electric-sql/pglite/dist/index.js:3:292235)
+    at async eval (/workspace/src/lib/db.ts:182:4)
+    at async createPgliteSql (/workspace/src/lib/db.ts:212:13)
