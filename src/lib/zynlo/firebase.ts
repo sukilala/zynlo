@@ -175,13 +175,21 @@ function mapClient(r: Record<string, unknown>): Client {
   };
 }
 
-function mapCall(r: Record<string, unknown>): Call {
+function mapCall(
+  r: Record<string, unknown>,
+  clientIdOverride?: string | null,
+): Call {
   return {
     id: String(r.id),
     datetime: String(r.datetime || ""),
     agentId: String(r.agentId || ""),
     customerId: String(r.customerId || ""),
-    clientId: r.clientId ? String(r.clientId) : null,
+    clientId:
+      clientIdOverride !== undefined
+        ? clientIdOverride
+        : r.clientId
+          ? String(r.clientId)
+          : null,
     type: (r.type as Call["type"]) || "Inbound",
     duration: Number(r.duration) || 0,
     outcome: (r.outcome as Call["outcome"]) || "Resolved",
@@ -223,18 +231,56 @@ function valuesSorted(
   );
 }
 
+/** Normalize client/company names for fuzzy matching (CC Express variants). */
+function normName(s: string): string {
+  return (s || "").toLowerCase().replace(/[^a-z0-9]/g, "");
+}
+
+function buildClientLookup(clients: Client[]): Map<string, string> {
+  const m = new Map<string, string>();
+  for (const c of clients) {
+    m.set(normName(c.name), c.id);
+  }
+  return m;
+}
+
+function resolveClientId(
+  lookup: Map<string, string>,
+  clientId: unknown,
+  legacyClientName: unknown,
+): string | null {
+  if (clientId) return String(clientId);
+  if (legacyClientName) {
+    const id = lookup.get(normName(String(legacyClientName)));
+    if (id) return id;
+  }
+  return null;
+}
+
 export async function firebaseLoadAll(): Promise<ZynloData> {
   await ensureFirebaseMaps();
-  const root = (await rtdbFetch<Record<string, unknown> | null>(
-    "/.json",
-  )) || {};
+  const root =
+    (await rtdbFetch<Record<string, unknown> | null>("/.json")) || {};
 
   const agents = valuesSorted(toIdMap(root.agents), "name").map(mapAgent);
-  const customers = valuesSorted(toIdMap(root.customers), "name").map(
-    mapCustomer,
-  );
   const clients = valuesSorted(toIdMap(root.clients), "name").map(mapClient);
-  const calls = valuesSorted(toIdMap(root.calls), "datetime").map(mapCall);
+  const clientLookup = buildClientLookup(clients);
+
+  const customers = valuesSorted(toIdMap(root.customers), "name").map((r) => {
+    const c = mapCustomer(r);
+    if (!c.clientId && c.company) {
+      const resolved = clientLookup.get(normName(c.company));
+      if (resolved) return { ...c, clientId: resolved };
+    }
+    return c;
+  });
+
+  const calls = valuesSorted(toIdMap(root.calls), "datetime").map((r) =>
+    mapCall(
+      r,
+      resolveClientId(clientLookup, r.clientId, r.client),
+    ),
+  );
   const messages = valuesSorted(toIdMap(root.messages), "datetime").map(
     mapMessage,
   );
@@ -286,7 +332,16 @@ export async function firebaseUpsertAgent(input: {
 }
 
 export async function firebaseDeleteAgent(id: string): Promise<void> {
-  await deleteItem("agents", id);
+  const data = await firebaseLoadAll();
+  await Promise.all([
+    deleteItem("agents", id),
+    ...data.calls
+      .filter((c) => c.agentId === id)
+      .map((c) => deleteItem("calls", c.id)),
+    ...data.messages
+      .filter((m) => m.agentId === id)
+      .map((m) => deleteItem("messages", m.id)),
+  ]);
 }
 
 export async function firebaseUpsertCustomer(input: {
@@ -317,7 +372,16 @@ export async function firebaseUpsertCustomer(input: {
 }
 
 export async function firebaseDeleteCustomer(id: string): Promise<void> {
-  await deleteItem("customers", id);
+  const data = await firebaseLoadAll();
+  await Promise.all([
+    deleteItem("customers", id),
+    ...data.calls
+      .filter((c) => c.customerId === id)
+      .map((c) => deleteItem("calls", c.id)),
+    ...data.messages
+      .filter((m) => m.customerId === id)
+      .map((m) => deleteItem("messages", m.id)),
+  ]);
 }
 
 export async function firebaseUpsertClient(input: {

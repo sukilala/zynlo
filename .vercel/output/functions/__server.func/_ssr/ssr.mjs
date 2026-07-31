@@ -1,4 +1,4 @@
-import { r as __exportAll } from "../_runtime.mjs";
+import { n as __exportAll } from "../_runtime.mjs";
 import { C as resolveManifestCssLink, D as parseRedirect, E as isResolvedRedirect, N as require_react, O as rootRouteId, S as resolveManifestAssetLink, T as isRedirect, a as replaceSsrResponse, b as getScriptPreloadAttrs, h as require_jsx_runtime, i as normalizeSsrResponse, j as invariant, k as isNotFound, l as RouterProvider, n as defineHandlerCallback, o as stripSsrResponseBody, r as isSsrResponse, t as renderRouterToStream, w as executeRewriteInput, x as getStylesheetHref } from "../_libs/@tanstack/react-router+[...].mjs";
 import { n as createMemoryHistory } from "../_libs/tanstack__history.mjs";
 import { a as defaultSerovalPlugins, c as makeSerovalPlugin, d as lu, i as getOrigin, l as Ou, n as attachRouterServerSsrUtils, o as createRawStreamRPCPlugin, r as getNormalizedURL, s as createSerializationAdapter, t as mergeHeaders, u as cu } from "../_libs/@tanstack/router-core+[...].mjs";
@@ -87,7 +87,7 @@ var HEADERS = { TSS_SHELL: "X-TSS_SHELL" };
 * the dev styles URL for route-scoped CSS collection.
 */
 async function getStartManifest(matchedRoutes) {
-	const { tsrStartManifest } = await import("../_tanstack-start-manifest_v-DKAK85jD.mjs");
+	const { tsrStartManifest } = await import("../_tanstack-start-manifest_v-5SIm3BNO.mjs");
 	const startManifest = tsrStartManifest();
 	let routes = startManifest.routes;
 	routes[rootRouteId];
@@ -107,41 +107,53 @@ async function getStartManifest(matchedRoutes) {
 	};
 }
 var manifest = {
+	"0ac55d47f0342569c31a58a5ac369acfe1da2b2c9ec26c3d010af713150b8734": {
+		functionName: "getStorageMode_createServerFn_handler",
+		importer: () => import("./server-b6LaWcuG.mjs")
+	},
 	"1aab58855d90df3fb70d76f00b68eb5d12ad4ba43e457e26d64aa3921795a501": {
 		functionName: "deleteAgent_createServerFn_handler",
-		importer: () => import("./server-DeDkoFQO.mjs")
+		importer: () => import("./server-b6LaWcuG.mjs")
 	},
 	"1c0926fbb6ea350a61ed7814a761531fbc3df3ec1464cf6574c5fbef7d60e991": {
 		functionName: "saveAgent_createServerFn_handler",
-		importer: () => import("./server-DeDkoFQO.mjs")
+		importer: () => import("./server-b6LaWcuG.mjs")
+	},
+	"1d7a446dada714074d111ee28ddf4825523e5f9533573346914a0ac6858528fe": {
+		functionName: "saveMessage_createServerFn_handler",
+		importer: () => import("./server-b6LaWcuG.mjs")
 	},
 	"50e6be06f0b2831bcd80980c9ca4cb9c248b9b459c77b822b27b452026a40c4b": {
 		functionName: "saveCustomer_createServerFn_handler",
-		importer: () => import("./server-DeDkoFQO.mjs")
+		importer: () => import("./server-b6LaWcuG.mjs")
 	},
 	"546a5d52727c545a8476cbc19bbd89c2044eaf2a6024fd449aa84b10c3a2f773": {
 		functionName: "saveCall_createServerFn_handler",
-		importer: () => import("./server-DeDkoFQO.mjs")
+		importer: () => import("./server-b6LaWcuG.mjs")
 	},
 	"72da098738cac099623266b617a02dab7e4fe5b081d3544dc07996d0dbef5e44": {
 		functionName: "saveClient_createServerFn_handler",
-		importer: () => import("./server-DeDkoFQO.mjs")
+		importer: () => import("./server-b6LaWcuG.mjs")
 	},
 	"7a0b35f97bc22a1926b37460e302eefd4d59c949892cf5d551f57fe0e0cc6c99": {
 		functionName: "getAllData_createServerFn_handler",
-		importer: () => import("./server-DeDkoFQO.mjs")
+		importer: () => import("./server-b6LaWcuG.mjs")
 	},
 	"8ed78f52680f12f3815a7e3555b4911e9db9b731e0b449666b8cecd3ab2368a0": {
 		functionName: "deleteCustomer_createServerFn_handler",
-		importer: () => import("./server-DeDkoFQO.mjs")
+		importer: () => import("./server-b6LaWcuG.mjs")
 	},
 	"deee10331dd88a5ff97e91cc139afb0c93aae2ab7f03e8a0f8b5eb0ed4de6adc": {
 		functionName: "deleteClient_createServerFn_handler",
-		importer: () => import("./server-DeDkoFQO.mjs")
+		importer: () => import("./server-b6LaWcuG.mjs")
 	},
 	"ed7ecdc4db7b1e406d8334cbea057c8b365399b81b235c810f5d6ee07f50b6fc": {
 		functionName: "deleteCall_createServerFn_handler",
-		importer: () => import("./server-DeDkoFQO.mjs")
+		importer: () => import("./server-b6LaWcuG.mjs")
+	},
+	"ee0dc78d8172a3fbe5314144768d924fd23b4f0149a04acb25741d08add2763b": {
+		functionName: "deleteMessage_createServerFn_handler",
+		importer: () => import("./server-b6LaWcuG.mjs")
 	}
 };
 async function getServerFnById(id, access) {
@@ -1411,7 +1423,7 @@ var getBaseManifest = getProdBaseManifest;
 var createEarlyHintsForRequest = createEarlyHintsCollector;
 async function loadEntries() {
 	const [routerEntry, startEntry, pluginAdapters] = await Promise.all([
-		import("./router-BDFlWJKg.mjs"),
+		import("./router-BXH1-OSC.mjs"),
 		import("./start-5Z2QO8AU.mjs"),
 		import("./empty-plugin-adapters-D9UWiqvJ.mjs")
 	]);

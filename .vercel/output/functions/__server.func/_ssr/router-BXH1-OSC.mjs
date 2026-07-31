@@ -1,8 +1,8 @@
 import { c as HeadContent, d as Outlet, h as require_jsx_runtime, m as createRootRoute, s as Scripts, u as createRouter } from "../_libs/@tanstack/react-router+[...].mjs";
-import { t as Route$1 } from "./routes-D1WGcV3p.mjs";
-//#region node_modules/.nitro/vite/services/ssr/assets/router-BDFlWJKg.js
+import { t as Route$1 } from "./routes-CQ_Ekgih.mjs";
+//#region node_modules/.nitro/vite/services/ssr/assets/router-BXH1-OSC.js
 var import_jsx_runtime = require_jsx_runtime();
-var styles_default = "/assets/styles-dmZ-kcSz.css";
+var styles_default = "/assets/styles-D_8xbXu1.css";
 var Route = createRootRoute({
 	head: () => ({
 		meta: [
@@ -11,10 +11,10 @@ var Route = createRootRoute({
 				name: "viewport",
 				content: "width=device-width, initial-scale=1, maximum-scale=1, user-scalable=no"
 			},
-			{ title: "Zynlo — Call Center CRM" },
+			{ title: "Zynlo" },
 			{
 				name: "description",
-				content: "Zynlo call center operations — agents, calls, customers, clients, analytics."
+				content: "Zynlo call center operations."
 			},
 			{
 				name: "theme-color",

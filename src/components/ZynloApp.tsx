@@ -70,6 +70,7 @@ import {
   customerMap,
   downloadText,
   escapeCsv,
+  filterSinceDatetime,
   formatDate,
   formatDuration,
   getAgentStats,
@@ -178,6 +179,7 @@ export function ZynloApp({ initial }: { initial: ZynloData }) {
   >("performance");
   const [exportClientStep, setExportClientStep] = useState(false);
   const [exportClientName, setExportClientName] = useState("");
+  const [selectedClientId, setSelectedClientId] = useState<string | null>(null);
 
   const [callForm, setCallForm] = useState({
     datetime: localDatetimeValue(),
@@ -449,6 +451,7 @@ export function ZynloApp({ initial }: { initial: ZynloData }) {
         c.industry.toLowerCase().includes(q) ||
         c.email.toLowerCase().includes(q) ||
         c.phone.includes(q) ||
+        c.status.toLowerCase().includes(q) ||
         (c.notes || "").toLowerCase().includes(q),
     );
   }, [data.clients, clientSearch]);
@@ -769,7 +772,7 @@ export function ZynloApp({ initial }: { initial: ZynloData }) {
     setModal("confirm");
   }
 
-  function exportCsv(type: string) {
+  function exportCsv(type: string, clientIdOverride?: string) {
     const date = new Date().toISOString().split("T")[0];
     if (type === "calls") {
       const header =
@@ -858,7 +861,7 @@ export function ZynloApp({ initial }: { initial: ZynloData }) {
       downloadText(header + rows, `zynlo_customers_${date}.csv`, "text/csv");
     } else if (type === "clients") {
       const header =
-        "Company,Industry,Phone,Email,Status,Contacts,Calls,Messages,Notes\n";
+        "Company,Industry,Phone,Email,Website,Status,Contacts,Calls,Messages,Resolved,Escalated,Follow-up,Avg Duration (min),Avg QA,Last Activity,Account Notes,Activity Notes\n";
       const rows = data.clients
         .map((c) => {
           const s = getClientStats(data, c.id);
@@ -867,17 +870,208 @@ export function ZynloApp({ initial }: { initial: ZynloData }) {
             c.industry,
             c.phone,
             c.email,
+            c.website,
             c.status,
             s.contacts,
             s.calls,
             s.messages,
-            c.notes,
+            s.resolved,
+            s.escalated,
+            s.followUp,
+            s.avgDuration.toFixed(1),
+            s.avgQa ? s.avgQa.toFixed(1) : "",
+            s.lastActivity ? formatDate(s.lastActivity) : "",
+            s.accountNotes,
+            s.activityNotes,
           ]
             .map(escapeCsv)
             .join(",");
         })
         .join("\n");
       downloadText(header + rows, `zynlo_clients_${date}.csv`, "text/csv");
+    } else if (type === "client-report") {
+      // Bi-weekly client pack: one detailed CSV per selected client (or all)
+      const pickId = clientIdOverride || exportClientName;
+      const clientIds = pickId
+        ? data.clients.filter((c) => c.id === pickId).map((c) => c.id)
+        : data.clients.map((c) => c.id);
+      if (clientIds.length === 0) {
+        toast("No client selected");
+        return;
+      }
+      for (const clientId of clientIds) {
+        const client = clientsById[clientId];
+        if (!client) continue;
+        const s = getClientStats(data, clientId);
+        const periodCalls = filterSinceDatetime(s.callList, 14);
+        const periodMsgs = filterSinceDatetime(s.messageList, 14);
+        const lines: string[] = [];
+        lines.push(["Report Type", "Bi-weekly Client Report"].map(escapeCsv).join(","));
+        lines.push(["Period", "Last 14 days"].map(escapeCsv).join(","));
+        lines.push(["Generated", date].map(escapeCsv).join(","));
+        lines.push("");
+        lines.push("CLIENT SUMMARY");
+        lines.push(
+          [
+            "Company",
+            "Status",
+            "Industry",
+            "Phone",
+            "Email",
+            "Website",
+            "Account Notes",
+          ]
+            .map(escapeCsv)
+            .join(","),
+        );
+        lines.push(
+          [
+            client.name,
+            client.status,
+            client.industry,
+            client.phone,
+            client.email,
+            client.website,
+            client.notes,
+          ]
+            .map(escapeCsv)
+            .join(","),
+        );
+        lines.push("");
+        lines.push("PERIOD TOTALS");
+        lines.push(
+          [
+            "Customers",
+            "Calls (14d)",
+            "Messages (14d)",
+            "Calls (all)",
+            "Messages (all)",
+            "Resolved",
+            "Escalated",
+            "Follow-up",
+            "Avg Duration (min)",
+            "Avg QA",
+          ]
+            .map(escapeCsv)
+            .join(","),
+        );
+        lines.push(
+          [
+            s.contacts,
+            periodCalls.length,
+            periodMsgs.length,
+            s.calls,
+            s.messages,
+            s.resolved,
+            s.escalated,
+            s.followUp,
+            s.avgDuration.toFixed(1),
+            s.avgQa ? s.avgQa.toFixed(1) : "",
+          ]
+            .map(escapeCsv)
+            .join(","),
+        );
+        lines.push("");
+        lines.push("CUSTOMERS");
+        lines.push(
+          ["Name", "Phone", "Email", "Company", "Calls", "Messages", "Notes"]
+            .map(escapeCsv)
+            .join(","),
+        );
+        for (const cu of s.contactList) {
+          const cs = getCustomerStats(data, cu.id);
+          lines.push(
+            [
+              cu.name,
+              cu.phone,
+              cu.email,
+              cu.company,
+              cs.total,
+              cs.messages,
+              cs.activityNotes,
+            ]
+              .map(escapeCsv)
+              .join(","),
+          );
+        }
+        if (s.contactList.length === 0) lines.push(["(none)"].map(escapeCsv).join(","));
+        lines.push("");
+        lines.push("CALLS (LAST 14 DAYS)");
+        lines.push(
+          [
+            "Datetime",
+            "Agent",
+            "Customer",
+            "Type",
+            "Duration (min)",
+            "Outcome",
+            "QA Rating",
+            "Notes",
+          ]
+            .map(escapeCsv)
+            .join(","),
+        );
+        for (const call of periodCalls) {
+          lines.push(
+            [
+              call.datetime,
+              agentsById[call.agentId]?.name || "",
+              customersById[call.customerId]?.name || "",
+              call.type,
+              call.duration,
+              call.outcome,
+              call.rating ?? "",
+              call.notes,
+            ]
+              .map(escapeCsv)
+              .join(","),
+          );
+        }
+        if (periodCalls.length === 0) lines.push(["(none)"].map(escapeCsv).join(","));
+        lines.push("");
+        lines.push("MESSAGES (LAST 14 DAYS)");
+        lines.push(
+          [
+            "Datetime",
+            "Agent",
+            "Customer",
+            "Channel",
+            "Direction",
+            "Status",
+            "Subject",
+            "Body",
+            "Notes",
+          ]
+            .map(escapeCsv)
+            .join(","),
+        );
+        for (const m of periodMsgs) {
+          lines.push(
+            [
+              m.datetime,
+              agentsById[m.agentId]?.name || "",
+              customersById[m.customerId]?.name || "",
+              m.channel,
+              m.direction,
+              m.status,
+              m.subject,
+              m.body,
+              m.notes,
+            ]
+              .map(escapeCsv)
+              .join(","),
+          );
+        }
+        if (periodMsgs.length === 0) lines.push(["(none)"].map(escapeCsv).join(","));
+        const safe = client.name.replace(/[^a-zA-Z0-9_-]+/g, "_").slice(0, 40);
+        downloadText(
+          lines.join("\n"),
+          `zynlo_client_report_${safe}_${date}.csv`,
+          "text/csv",
+        );
+      }
+      setExportClientName("");
+      setExportClientStep(false);
     } else if (type === "json") {
       downloadText(
         JSON.stringify(data, null, 2),
@@ -1666,130 +1860,444 @@ export function ZynloApp({ initial }: { initial: ZynloData }) {
               <SearchBox
                 value={clientSearch}
                 onChange={setClientSearch}
-                placeholder="Search..."
+                placeholder="Search clients..."
               />
+              {selectedClientId ? (
+                <Btn
+                  variant="secondary"
+                  onClick={() => setSelectedClientId(null)}
+                >
+                  All clients
+                </Btn>
+              ) : null}
             </Toolbar>
-            <Card>
-              {data.clients.length === 0 ? (
-                <EmptyState
-                  icon={<Building2 className="h-12 w-12" />}
-                  title="No clients yet"
-                  description="Add your first client."
-                />
-              ) : (
-                <>
-                  <div className="hidden overflow-x-auto md:block">
-                    <table className="w-full text-sm">
-                      <thead>
-                        <tr className="bg-purple-50 text-left text-[11px] font-semibold uppercase tracking-wide text-muted">
-                          <th className="px-4 py-3">Company</th>
-                          <th className="px-4 py-3">Notes</th>
-                          <th className="px-4 py-3">Industry</th>
-                          <th className="px-4 py-3">Status</th>
-                          <th className="px-4 py-3">Phone</th>
-                          <th className="px-4 py-3">Contacts</th>
-                          <th className="px-4 py-3">Calls</th>
-                          <th className="px-4 py-3">Msgs</th>
-                          <th className="px-4 py-3">Actions</th>
-                        </tr>
-                      </thead>
-                      <tbody>
-                        {filteredClients.map((c) => {
-                          const s = getClientStats(data, c.id);
-                          return (
-                            <tr
-                              key={c.id}
-                              className="border-t border-border hover:bg-purple-50/60"
-                            >
-                              <td className="px-4 py-3">
-                                <div className="font-semibold">{c.name}</div>
-                                {c.email ? (
-                                  <div className="text-xs text-muted">
-                                    {c.email}
-                                  </div>
-                                ) : null}
-                              </td>
-                              <td className="min-w-[160px] max-w-[280px] px-4 py-3 text-sm">
-                                {c.notes?.trim() ? (
-                                  <span className="line-clamp-3 whitespace-pre-wrap">
-                                    {c.notes}
-                                  </span>
-                                ) : (
-                                  <span className="text-muted">-</span>
-                                )}
-                              </td>
-                              <td className="px-4 py-3">
-                                {c.industry || "-"}
-                              </td>
-                              <td className="px-4 py-3">
-                                <Badge
-                                  tone={
-                                    c.status === "Active" ? "strong" : "soft"
-                                  }
+
+            {!selectedClientId ? (
+              <Card>
+                {data.clients.length === 0 ? (
+                  <EmptyState
+                    icon={<Building2 className="h-12 w-12" />}
+                    title="No clients yet"
+                    description="Add your first client."
+                  />
+                ) : filteredClients.length === 0 ? (
+                  <EmptyState
+                    icon={<Building2 className="h-12 w-12" />}
+                    title="No matches"
+                    description="Try a different search."
+                  />
+                ) : (
+                  <>
+                    <div className="hidden overflow-x-auto md:block">
+                      <table className="w-full text-sm">
+                        <thead>
+                          <tr className="bg-purple-50 text-left text-[11px] font-semibold uppercase tracking-wide text-muted">
+                            <th className="px-4 py-3">Company</th>
+                            <th className="px-4 py-3">Status</th>
+                            <th className="px-4 py-3">Customers</th>
+                            <th className="px-4 py-3">Calls</th>
+                            <th className="px-4 py-3">Messages</th>
+                            <th className="px-4 py-3">Notes</th>
+                            <th className="px-4 py-3">Last activity</th>
+                            <th className="px-4 py-3">Actions</th>
+                          </tr>
+                        </thead>
+                        <tbody>
+                          {filteredClients.map((c) => {
+                            const s = getClientStats(data, c.id);
+                            return (
+                              <tr
+                                key={c.id}
+                                className="cursor-pointer border-t border-border hover:bg-purple-50/60"
+                                onClick={() => setSelectedClientId(c.id)}
+                              >
+                                <td className="px-4 py-3">
+                                  <div className="font-semibold">{c.name}</div>
+                                  {c.industry ? (
+                                    <div className="text-xs text-muted">
+                                      {c.industry}
+                                    </div>
+                                  ) : null}
+                                </td>
+                                <td className="px-4 py-3">
+                                  <Badge
+                                    tone={
+                                      c.status === "Active" ? "strong" : "soft"
+                                    }
+                                  >
+                                    {c.status}
+                                  </Badge>
+                                </td>
+                                <td className="px-4 py-3 font-semibold">
+                                  {s.contacts}
+                                </td>
+                                <td className="px-4 py-3">{s.calls}</td>
+                                <td className="px-4 py-3">{s.messages}</td>
+                                <td
+                                  className="max-w-[200px] truncate px-4 py-3 text-xs text-muted"
+                                  title={s.allNotes || undefined}
                                 >
-                                  {c.status}
-                                </Badge>
-                              </td>
-                              <td className="px-4 py-3">{c.phone || "-"}</td>
-                              <td className="px-4 py-3 font-semibold">
-                                {s.contacts}
-                              </td>
-                              <td className="px-4 py-3">{s.calls}</td>
-                              <td className="px-4 py-3">{s.messages}</td>
-                              <td className="px-4 py-3">
-                                <RowActions
-                                  onEdit={() => openModal("client", c.id)}
-                                  onDelete={() =>
-                                    askDelete(
-                                      "Delete Client?",
-                                      "Delete this client?",
-                                      () =>
-                                        deleteClient({
-                                          data: { id: c.id },
-                                        }).then(() => undefined),
-                                    )
-                                  }
-                                />
-                              </td>
-                            </tr>
-                          );
-                        })}
-                      </tbody>
-                    </table>
+                                  {shortNotes(s.allNotes)}
+                                </td>
+                                <td className="px-4 py-3 text-xs">
+                                  {s.lastActivity
+                                    ? formatDate(s.lastActivity)
+                                    : "Never"}
+                                </td>
+                                <td
+                                  className="px-4 py-3"
+                                  onClick={(e) => e.stopPropagation()}
+                                >
+                                  <div className="flex items-center gap-1">
+                                    <Btn
+                                      variant="secondary"
+                                      onClick={() => setSelectedClientId(c.id)}
+                                    >
+                                      Open
+                                    </Btn>
+                                    <RowActions
+                                      onEdit={() => openModal("client", c.id)}
+                                      onDelete={() =>
+                                        askDelete(
+                                          "Delete Client?",
+                                          "Delete this client?",
+                                          () =>
+                                            deleteClient({
+                                              data: { id: c.id },
+                                            }).then(() => undefined),
+                                        )
+                                      }
+                                    />
+                                  </div>
+                                </td>
+                              </tr>
+                            );
+                          })}
+                        </tbody>
+                      </table>
+                    </div>
+                    <div className="space-y-3 p-4 md:hidden">
+                      {filteredClients.map((c) => {
+                        const s = getClientStats(data, c.id);
+                        return (
+                          <button
+                            key={c.id}
+                            type="button"
+                            className="w-full rounded-xl border border-border bg-white p-4 text-left shadow-sm"
+                            onClick={() => setSelectedClientId(c.id)}
+                          >
+                            <div className="mb-2 flex items-start justify-between gap-2">
+                              <div>
+                                <div className="font-bold text-fg">{c.name}</div>
+                                <div className="text-xs text-muted">
+                                  {c.industry || "Company"}
+                                </div>
+                              </div>
+                              <Badge
+                                tone={
+                                  c.status === "Active" ? "strong" : "soft"
+                                }
+                              >
+                                {c.status}
+                              </Badge>
+                            </div>
+                            <div className="grid grid-cols-3 gap-2 text-center text-xs">
+                              <div className="rounded-lg bg-purple-50 p-2">
+                                <div className="font-bold text-primary">
+                                  {s.contacts}
+                                </div>
+                                <div className="text-muted">Customers</div>
+                              </div>
+                              <div className="rounded-lg bg-purple-50 p-2">
+                                <div className="font-bold text-primary">
+                                  {s.calls}
+                                </div>
+                                <div className="text-muted">Calls</div>
+                              </div>
+                              <div className="rounded-lg bg-purple-50 p-2">
+                                <div className="font-bold text-primary">
+                                  {s.messages}
+                                </div>
+                                <div className="text-muted">Messages</div>
+                              </div>
+                            </div>
+                            {s.allNotes ? (
+                              <div className="mt-2 line-clamp-2 text-xs text-muted">
+                                {s.allNotes}
+                              </div>
+                            ) : null}
+                          </button>
+                        );
+                      })}
+                    </div>
+                  </>
+                )}
+              </Card>
+            ) : (
+              (() => {
+                const client = clientsById[selectedClientId];
+                if (!client) {
+                  return (
+                    <Card>
+                      <EmptyState
+                        icon={<Building2 className="h-12 w-12" />}
+                        title="Client not found"
+                        description="Go back to the client list."
+                      />
+                    </Card>
+                  );
+                }
+                const s = getClientStats(data, client.id);
+                return (
+                  <div className="space-y-5">
+                    <Card>
+                      <div className="flex flex-col gap-4 p-5 sm:flex-row sm:items-start sm:justify-between">
+                        <div className="min-w-0">
+                          <div className="mb-2 flex flex-wrap items-center gap-2">
+                            <h2 className="text-xl font-bold text-fg">
+                              {client.name}
+                            </h2>
+                            <Badge
+                              tone={
+                                client.status === "Active" ? "strong" : "soft"
+                              }
+                            >
+                              {client.status}
+                            </Badge>
+                          </div>
+                          <div className="flex flex-wrap gap-x-4 gap-y-1 text-sm text-muted">
+                            {client.industry ? (
+                              <span>{client.industry}</span>
+                            ) : null}
+                            {client.phone ? <span>{client.phone}</span> : null}
+                            {client.email ? <span>{client.email}</span> : null}
+                            {client.website ? (
+                              <span>{client.website}</span>
+                            ) : null}
+                          </div>
+                          {client.notes?.trim() ? (
+                            <p className="mt-3 whitespace-pre-wrap text-sm text-fg">
+                              <span className="font-semibold text-muted">
+                                Notes:{" "}
+                              </span>
+                              {client.notes}
+                            </p>
+                          ) : (
+                            <p className="mt-3 text-sm text-muted">No account notes</p>
+                          )}
+                        </div>
+                        <div className="flex shrink-0 flex-wrap gap-2">
+                          <Btn
+                            variant="secondary"
+                            onClick={() => openModal("client", client.id)}
+                          >
+                            Edit
+                          </Btn>
+                          <Btn
+                            onClick={() => exportCsv("client-report", client.id)}
+                          >
+                            <Download className="h-4 w-4" />
+                            Bi-weekly CSV
+                          </Btn>
+                        </div>
+                      </div>
+                      <div className="grid grid-cols-2 gap-3 border-t border-border p-4 sm:grid-cols-3 lg:grid-cols-6">
+                        {[
+                          ["Customers", s.contacts],
+                          ["Calls", s.calls],
+                          ["Messages", s.messages],
+                          ["Resolved", s.resolved],
+                          ["Escalated", s.escalated],
+                          ["Avg handle", formatDuration(s.avgDuration)],
+                        ].map(([label, value]) => (
+                          <div
+                            key={String(label)}
+                            className="rounded-xl bg-purple-50 px-3 py-3 text-center"
+                          >
+                            <div className="text-lg font-bold text-primary">
+                              {value}
+                            </div>
+                            <div className="text-[11px] font-semibold uppercase tracking-wide text-muted">
+                              {label}
+                            </div>
+                          </div>
+                        ))}
+                      </div>
+                    </Card>
+
+                    <Card>
+                      <CardHeader title={`Customers (${s.contacts})`} />
+                      {s.contactList.length === 0 ? (
+                        <div className="px-5 pb-5 text-sm text-muted">
+                          No customers linked to this client yet.
+                        </div>
+                      ) : (
+                        <div className="max-h-80 overflow-auto">
+                          <table className="w-full text-sm">
+                            <thead>
+                              <tr className="bg-purple-50 text-left text-[11px] font-semibold uppercase tracking-wide text-muted">
+                                <th className="px-4 py-2">Name</th>
+                                <th className="px-4 py-2">Phone</th>
+                                <th className="px-4 py-2">Calls</th>
+                                <th className="px-4 py-2">Msgs</th>
+                                <th className="px-4 py-2">Notes</th>
+                              </tr>
+                            </thead>
+                            <tbody>
+                              {s.contactList.map((cu) => {
+                                const cs = getCustomerStats(data, cu.id);
+                                return (
+                                  <tr
+                                    key={cu.id}
+                                    className="border-t border-border"
+                                  >
+                                    <td className="px-4 py-2 font-semibold">
+                                      {cu.name}
+                                    </td>
+                                    <td className="px-4 py-2">{cu.phone}</td>
+                                    <td className="px-4 py-2">{cs.total}</td>
+                                    <td className="px-4 py-2">
+                                      {cs.messages}
+                                    </td>
+                                    <td
+                                      className="max-w-[140px] truncate px-4 py-2 text-xs text-muted"
+                                      title={cs.activityNotes || undefined}
+                                    >
+                                      {shortNotes(cs.activityNotes)}
+                                    </td>
+                                  </tr>
+                                );
+                              })}
+                            </tbody>
+                          </table>
+                        </div>
+                      )}
+                    </Card>
+
+                    <Card>
+                      <CardHeader title={`Calls (${s.calls})`} />
+                      {s.callList.length === 0 ? (
+                        <div className="px-5 pb-5 text-sm text-muted">
+                          No calls for this client yet.
+                        </div>
+                      ) : (
+                        <div className="max-h-96 overflow-auto">
+                          <table className="w-full text-sm">
+                            <thead>
+                              <tr className="bg-purple-50 text-left text-[11px] font-semibold uppercase tracking-wide text-muted">
+                                <th className="px-4 py-2">When</th>
+                                <th className="px-4 py-2">Agent</th>
+                                <th className="px-4 py-2">Customer</th>
+                                <th className="px-4 py-2">Type</th>
+                                <th className="px-4 py-2">Duration</th>
+                                <th className="px-4 py-2">Outcome</th>
+                                <th className="px-4 py-2">Notes</th>
+                              </tr>
+                            </thead>
+                            <tbody>
+                              {s.callList.slice(0, 50).map((call) => (
+                                <tr
+                                  key={call.id}
+                                  className="border-t border-border"
+                                >
+                                  <td className="whitespace-nowrap px-4 py-2 text-xs">
+                                    {formatDate(call.datetime)}
+                                  </td>
+                                  <td className="px-4 py-2">
+                                    {agentsById[call.agentId]?.name || "-"}
+                                  </td>
+                                  <td className="px-4 py-2">
+                                    {customersById[call.customerId]?.name ||
+                                      "-"}
+                                  </td>
+                                  <td className="px-4 py-2">{call.type}</td>
+                                  <td className="px-4 py-2">
+                                    {formatDuration(call.duration)}
+                                  </td>
+                                  <td className="px-4 py-2">
+                                    <Badge
+                                      tone={
+                                        call.outcome === "Resolved"
+                                          ? "strong"
+                                          : "soft"
+                                      }
+                                    >
+                                      {call.outcome}
+                                    </Badge>
+                                  </td>
+                                  <td
+                                    className="max-w-[160px] truncate px-4 py-2 text-xs text-muted"
+                                    title={call.notes || undefined}
+                                  >
+                                    {shortNotes(call.notes)}
+                                  </td>
+                                </tr>
+                              ))}
+                            </tbody>
+                          </table>
+                          {s.callList.length > 50 ? (
+                            <div className="border-t border-border px-4 py-2 text-xs text-muted">
+                              Showing 50 of {s.callList.length}. Use Bi-weekly
+                              CSV for the full export.
+                            </div>
+                          ) : null}
+                        </div>
+                      )}
+                    </Card>
+
+                    <Card>
+                      <CardHeader title={`Messages (${s.messages})`} />
+                      {s.messageList.length === 0 ? (
+                        <div className="px-5 pb-5 text-sm text-muted">
+                          No messages for this client yet.
+                        </div>
+                      ) : (
+                        <div className="max-h-80 overflow-auto">
+                          <table className="w-full text-sm">
+                            <thead>
+                              <tr className="bg-purple-50 text-left text-[11px] font-semibold uppercase tracking-wide text-muted">
+                                <th className="px-4 py-2">When</th>
+                                <th className="px-4 py-2">Agent</th>
+                                <th className="px-4 py-2">Customer</th>
+                                <th className="px-4 py-2">Channel</th>
+                                <th className="px-4 py-2">Status</th>
+                                <th className="px-4 py-2">Notes</th>
+                              </tr>
+                            </thead>
+                            <tbody>
+                              {s.messageList.slice(0, 50).map((m) => (
+                                <tr
+                                  key={m.id}
+                                  className="border-t border-border"
+                                >
+                                  <td className="whitespace-nowrap px-4 py-2 text-xs">
+                                    {formatDate(m.datetime)}
+                                  </td>
+                                  <td className="px-4 py-2">
+                                    {agentsById[m.agentId]?.name || "-"}
+                                  </td>
+                                  <td className="px-4 py-2">
+                                    {customersById[m.customerId]?.name || "-"}
+                                  </td>
+                                  <td className="px-4 py-2">{m.channel}</td>
+                                  <td className="px-4 py-2">{m.status}</td>
+                                  <td
+                                    className="max-w-[160px] truncate px-4 py-2 text-xs text-muted"
+                                    title={m.notes || undefined}
+                                  >
+                                    {shortNotes(m.notes)}
+                                  </td>
+                                </tr>
+                              ))}
+                            </tbody>
+                          </table>
+                        </div>
+                      )}
+                    </Card>
                   </div>
-                  <div className="space-y-3 p-4 md:hidden">
-                    {filteredClients.map((c) => {
-                      const s = getClientStats(data, c.id);
-                      return (
-                        <MobileCard
-                          key={c.id}
-                          title={c.name}
-                          subtitle={`${c.industry || "Company"} · ${c.status}`}
-                          rows={[
-                            ["Notes", c.notes?.trim() || "-"],
-                            ["Phone", c.phone || "-"],
-                            ["Contacts", String(s.contacts)],
-                            ["Calls", String(s.calls)],
-                            ["Messages", String(s.messages)],
-                          ]}
-                          onEdit={() => openModal("client", c.id)}
-                          onDelete={() =>
-                            askDelete(
-                              "Delete Client?",
-                              "Delete this client?",
-                              () =>
-                                deleteClient({ data: { id: c.id } }).then(
-                                  () => undefined,
-                                ),
-                            )
-                          }
-                        />
-                      );
-                    })}
-                  </div>
-                </>
-              )}
-            </Card>
+                );
+              })()
+            )}
           </SectionView>
         )}
 
@@ -2549,11 +3057,12 @@ export function ZynloApp({ initial }: { initial: ZynloData }) {
       >
         <div className="grid gap-3">
           {[
+            ["client-report", "Client bi-weekly report (CSV)", "Last 14 days: summary, customers, calls, messages, notes"],
+            ["clients", "Clients summary (CSV)", "All clients with status, counts, notes"],
             ["calls", "Calls (CSV)", "Call log export"],
             ["messages", "Messages (CSV)", "Message log export"],
             ["agents", "Agents (CSV)", "Agent export"],
             ["customers", "Customers (CSV)", "Customer export"],
-            ["clients", "Clients (CSV)", "Client export"],
             ["json", "Full Backup (JSON)", "Complete backup"],
           ].map(([key, title, desc]) => (
             <button

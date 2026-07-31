@@ -1,11 +1,11 @@
-import { o as __toESM } from "../_runtime.mjs";
+import { i as __toESM } from "../_runtime.mjs";
 import { N as require_react, h as require_jsx_runtime } from "../_libs/@tanstack/react-router+[...].mjs";
-import { a as deleteCustomer, c as saveCall, i as deleteClient, l as saveClient, n as deleteAgent, o as getAllData, r as deleteCall, s as saveAgent, t as Route, u as saveCustomer } from "./routes-D1WGcV3p.mjs";
-import { a as Trash2, c as Plus, d as Menu, f as LayoutDashboard, g as Building2, h as ChartColumn, i as TrendingUp, l as Phone, m as ClipboardList, n as Users, o as Star, p as Download, r as UserRound, s as Search, t as X, u as Pencil } from "../_libs/lucide-react.mjs";
+import { a as deleteCustomer, c as saveAgent, d as saveCustomer, f as saveMessage, i as deleteClient, l as saveCall, n as deleteAgent, o as deleteMessage, r as deleteCall, s as getAllData, t as Route, u as saveClient } from "./routes-CQ_Ekgih.mjs";
+import { _ as Building2, a as Trash2, c as Plus, d as MessageSquare, f as Menu, g as ChartColumn, h as ClipboardList, i as TrendingUp, l as Phone, m as Download, n as Users, o as Star, p as LayoutDashboard, r as UserRound, s as Search, t as X, u as Pencil } from "../_libs/lucide-react.mjs";
 import { t as clsx } from "../_libs/clsx.mjs";
 import { a as XAxis, c as Bar, d as ResponsiveContainer, f as Tooltip, i as YAxis, l as Pie, n as BarChart, o as Line, r as LineChart, s as CartesianGrid, t as PieChart, u as Cell } from "../_libs/recharts+[...].mjs";
 import { t as twMerge } from "../_libs/tailwind-merge.mjs";
-//#region node_modules/.nitro/vite/services/ssr/assets/routes-CtOJuaz8.js
+//#region node_modules/.nitro/vite/services/ssr/assets/routes-CllQkfea.js
 var import_react = /* @__PURE__ */ __toESM(require_react());
 var import_jsx_runtime = require_jsx_runtime();
 var OUTCOMES = [
@@ -37,8 +37,22 @@ var CLIENT_STATUSES = [
 	"Inactive",
 	"Prospect"
 ];
+var MESSAGE_CHANNELS = [
+	"SMS",
+	"WhatsApp",
+	"Email",
+	"Chat",
+	"Social"
+];
+var MESSAGE_DIRECTIONS = ["Inbound", "Outbound"];
+var MESSAGE_STATUSES = [
+	"Open",
+	"Pending",
+	"Replied",
+	"Closed"
+];
 function formatDate(d) {
-	if (!d) return "—";
+	if (!d) return "-";
 	const date = new Date(d);
 	if (isNaN(date.getTime())) return d;
 	return date.toLocaleString("en-GB", {
@@ -50,7 +64,7 @@ function formatDate(d) {
 	});
 }
 function formatDuration(mins) {
-	if (!mins && mins !== 0) return "—";
+	if (!mins && mins !== 0) return "-";
 	if (mins < 1) return `${Math.round(mins * 60)}s`;
 	const m = Math.floor(mins);
 	const s = Math.round((mins - m) * 60);
@@ -75,8 +89,20 @@ function customerMap(data) {
 	for (const c of data.customers) m[c.id] = c;
 	return m;
 }
+function clientMap(data) {
+	const m = {};
+	for (const c of data.clients) m[c.id] = c;
+	return m;
+}
+/** Resolve display company for a customer: linked client name > free-text company */
+function customerCompanyLabel(customer, clients) {
+	if (!customer) return "-";
+	if (customer.clientId && clients[customer.clientId]) return clients[customer.clientId].name;
+	return customer.company || "-";
+}
 function getAgentStats(data, agentId) {
 	const agentCalls = data.calls.filter((c) => c.agentId === agentId);
+	const agentMsgs = (data.messages || []).filter((m) => m.agentId === agentId);
 	const total = agentCalls.length;
 	const resolved = agentCalls.filter((c) => c.outcome === "Resolved").length;
 	const rated = agentCalls.filter((c) => c.rating != null);
@@ -84,6 +110,7 @@ function getAgentStats(data, agentId) {
 	const csat = rated.length ? rated.reduce((s, c) => s + (c.rating || 0), 0) / rated.length : 0;
 	return {
 		total,
+		messages: agentMsgs.length,
 		resolved,
 		resolutionRate: total ? resolved / total : 0,
 		avgDuration,
@@ -92,9 +119,17 @@ function getAgentStats(data, agentId) {
 }
 function getCustomerStats(data, customerId) {
 	const custCalls = data.calls.filter((c) => c.customerId === customerId).sort((a, b) => new Date(b.datetime).getTime() - new Date(a.datetime).getTime());
+	const custMsgs = (data.messages || []).filter((m) => m.customerId === customerId).sort((a, b) => new Date(b.datetime).getTime() - new Date(a.datetime).getTime());
+	const lastCall = custCalls[0];
+	const lastMsg = custMsgs[0];
+	let lastContact = lastCall?.datetime;
+	if (lastMsg && (!lastContact || lastMsg.datetime > lastContact)) lastContact = lastMsg.datetime;
 	return {
 		total: custCalls.length,
-		lastCall: custCalls[0],
+		messages: custMsgs.length,
+		lastCall,
+		lastMessage: lastMsg,
+		lastContact,
 		resolved: custCalls.filter((c) => c.outcome === "Resolved").length,
 		escalated: custCalls.filter((c) => c.outcome === "Escalated").length,
 		avgDuration: custCalls.length ? custCalls.reduce((s, c) => s + (c.duration || 0), 0) / custCalls.length : 0,
@@ -102,8 +137,31 @@ function getCustomerStats(data, customerId) {
 			const rated = custCalls.filter((c) => c.rating != null);
 			return rated.length ? rated.reduce((s, c) => s + (c.rating || 0), 0) / rated.length : 0;
 		})(),
-		lastContact: custCalls[0]?.datetime,
+		activityNotes: (() => {
+			const items = [];
+			for (const c of custCalls) if (c.notes?.trim()) items.push({
+				t: c.datetime,
+				n: c.notes.trim()
+			});
+			for (const m of custMsgs) if (m.notes?.trim()) items.push({
+				t: m.datetime,
+				n: m.notes.trim()
+			});
+			items.sort((a, b) => new Date(b.t).getTime() - new Date(a.t).getTime());
+			return items.map((x) => x.n).join(" | ");
+		})(),
 		callNotes: custCalls.filter((c) => c.notes).map((c) => c.notes).join(" | ")
+	};
+}
+function getClientStats(data, clientId) {
+	const contacts = data.customers.filter((c) => c.clientId === clientId);
+	const calls = data.calls.filter((c) => c.clientId === clientId);
+	const messages = (data.messages || []).filter((m) => m.clientId === clientId);
+	return {
+		contacts: contacts.length,
+		calls: calls.length,
+		messages: messages.length,
+		lastCall: calls.slice().sort((a, b) => new Date(b.datetime).getTime() - new Date(a.datetime).getTime())[0]
 	};
 }
 function downloadText(content, filename, mime) {
@@ -123,6 +181,12 @@ function escapeCsv(val) {
 function localDatetimeValue(d = /* @__PURE__ */ new Date()) {
 	const pad = (n) => String(n).padStart(2, "0");
 	return `${d.getFullYear()}-${pad(d.getMonth() + 1)}-${pad(d.getDate())}T${pad(d.getHours())}:${pad(d.getMinutes())}`;
+}
+/** Truncate long notes for table cells */
+function shortNotes(text, max = 60) {
+	const t = (text || "").trim();
+	if (!t) return "-";
+	return t.length > max ? t.slice(0, max - 1) + "…" : t;
 }
 function cn(...inputs) {
 	return twMerge(clsx(inputs));
@@ -245,7 +309,7 @@ function EmptyState({ icon, title, description }) {
 function Stars({ rating }) {
 	if (!rating) return /* @__PURE__ */ (0, import_jsx_runtime.jsx)("span", {
 		className: "text-muted",
-		children: "—"
+		children: "-"
 	});
 	return /* @__PURE__ */ (0, import_jsx_runtime.jsxs)("span", {
 		className: "tracking-wider text-primary",
@@ -278,6 +342,11 @@ var NAV = [
 		icon: ClipboardList
 	},
 	{
+		id: "messages",
+		label: "Messages",
+		icon: MessageSquare
+	},
+	{
 		id: "agents",
 		label: "Agents",
 		icon: Users
@@ -288,14 +357,14 @@ var NAV = [
 		icon: UserRound
 	},
 	{
-		id: "analytics",
-		label: "Analytics",
-		icon: TrendingUp
-	},
-	{
 		id: "clients",
 		label: "Clients",
 		icon: Building2
+	},
+	{
+		id: "analytics",
+		label: "Analytics",
+		icon: TrendingUp
 	}
 ];
 var CHART_COLORS = [
@@ -312,8 +381,16 @@ var outcomeTone = (o) => {
 	if (o === "Follow-up") return "soft";
 	return "default";
 };
+var msgStatusTone = (s) => {
+	if (s === "Closed" || s === "Replied") return "strong";
+	if (s === "Pending") return "soft";
+	return "default";
+};
 function ZynloApp({ initial }) {
-	const [data, setData] = (0, import_react.useState)(initial);
+	const [data, setData] = (0, import_react.useState)({
+		...initial,
+		messages: initial.messages || []
+	});
 	const [section, setSection] = (0, import_react.useState)("dashboard");
 	const [sidebarOpen, setSidebarOpen] = (0, import_react.useState)(false);
 	const [modal, setModal] = (0, import_react.useState)(null);
@@ -324,11 +401,12 @@ function ZynloApp({ initial }) {
 	const [callSearch, setCallSearch] = (0, import_react.useState)("");
 	const [callOutcome, setCallOutcome] = (0, import_react.useState)("");
 	const [callAgent, setCallAgent] = (0, import_react.useState)("");
+	const [msgSearch, setMsgSearch] = (0, import_react.useState)("");
+	const [msgChannel, setMsgChannel] = (0, import_react.useState)("");
+	const [msgStatus, setMsgStatus] = (0, import_react.useState)("");
 	const [customerSearch, setCustomerSearch] = (0, import_react.useState)("");
 	const [clientSearch, setClientSearch] = (0, import_react.useState)("");
-	const [clientSort, setClientSort] = (0, import_react.useState)("calls-desc");
 	const [analyticsTab, setAnalyticsTab] = (0, import_react.useState)("performance");
-	const [openClientCards, setOpenClientCards] = (0, import_react.useState)({});
 	const [exportClientStep, setExportClientStep] = (0, import_react.useState)(false);
 	const [exportClientName, setExportClientName] = (0, import_react.useState)("");
 	const [callForm, setCallForm] = (0, import_react.useState)({
@@ -342,6 +420,18 @@ function ZynloApp({ initial }) {
 		rating: "",
 		notes: ""
 	});
+	const [msgForm, setMsgForm] = (0, import_react.useState)({
+		datetime: localDatetimeValue(),
+		agentId: "",
+		customerId: "",
+		clientId: "",
+		channel: "SMS",
+		direction: "Inbound",
+		subject: "",
+		body: "",
+		status: "Open",
+		notes: ""
+	});
 	const [agentForm, setAgentForm] = (0, import_react.useState)({
 		name: "",
 		email: "",
@@ -353,7 +443,7 @@ function ZynloApp({ initial }) {
 		phone: "",
 		email: "",
 		company: "",
-		notes: ""
+		clientId: ""
 	});
 	const [clientForm, setClientForm] = (0, import_react.useState)({
 		name: "",
@@ -376,22 +466,31 @@ function ZynloApp({ initial }) {
 	}, []);
 	const refresh = (0, import_react.useCallback)(async () => {
 		const next = await getAllData();
-		setData(next);
+		setData({
+			...next,
+			messages: next.messages || []
+		});
 		return next;
 	}, []);
 	(0, import_react.useEffect)(() => {
 		const t = setInterval(() => {
-			getAllData().then(setData).catch(() => void 0);
+			getAllData().then((next) => setData({
+				...next,
+				messages: next.messages || []
+			})).catch(() => void 0);
 		}, 8e3);
 		return () => clearInterval(t);
 	}, []);
 	const agentsById = (0, import_react.useMemo)(() => agentMap(data), [data]);
 	const customersById = (0, import_react.useMemo)(() => customerMap(data), [data]);
+	const clientsById = (0, import_react.useMemo)(() => clientMap(data), [data]);
+	const messages = data.messages || [];
 	const kpis = (0, import_react.useMemo)(() => {
 		const today = todayStr();
 		const yest = yesterdayStr();
 		const todayCalls = data.calls.filter((c) => c.datetime?.startsWith(today));
 		const yestCalls = data.calls.filter((c) => c.datetime?.startsWith(yest));
+		const todayMsgs = messages.filter((m) => m.datetime?.startsWith(today));
 		const resolved = todayCalls.filter((c) => c.outcome === "Resolved").length;
 		const resolution = todayCalls.length ? Math.round(resolved / todayCalls.length * 100) : 0;
 		const aht = todayCalls.length ? todayCalls.reduce((s, c) => s + (c.duration || 0), 0) / todayCalls.length : 0;
@@ -400,12 +499,13 @@ function ZynloApp({ initial }) {
 		const delta = todayCalls.length - yestCalls.length;
 		return {
 			totalToday: todayCalls.length,
+			msgsToday: todayMsgs.length,
 			delta,
 			resolution,
 			aht,
 			csat
 		};
-	}, [data.calls]);
+	}, [data.calls, messages]);
 	const hourData = (0, import_react.useMemo)(() => {
 		const hours = Array.from({ length: 24 }, (_, i) => ({
 			hour: `${i}:00`,
@@ -441,11 +541,12 @@ function ZynloApp({ initial }) {
 					weekday: "short",
 					day: "numeric"
 				}),
-				calls: data.calls.filter((c) => c.datetime?.startsWith(str)).length
+				calls: data.calls.filter((c) => c.datetime?.startsWith(str)).length,
+				messages: messages.filter((m) => m.datetime?.startsWith(str)).length
 			});
 		}
 		return days;
-	}, [data.calls]);
+	}, [data.calls, messages]);
 	const ahtTrend = (0, import_react.useMemo)(() => {
 		const days = [];
 		for (let i = 13; i >= 0; i--) {
@@ -467,7 +568,7 @@ function ZynloApp({ initial }) {
 	const agentRankings = (0, import_react.useMemo)(() => {
 		return data.agents.map((a) => {
 			const stats = getAgentStats(data, a.id);
-			const score = stats.total ? Math.round(stats.resolutionRate * 40 + stats.csat * 20 + Math.min(stats.total, 50) - stats.avgDuration * 2) : 0;
+			const score = stats.total ? Math.round(stats.resolutionRate * 40 + stats.csat * 20 + Math.min(stats.total, 50) - stats.avgDuration * 2 + stats.messages * 2) : stats.messages * 5;
 			return {
 				agent: a,
 				...stats,
@@ -481,7 +582,7 @@ function ZynloApp({ initial }) {
 		if (q) list = list.filter((c) => {
 			const a = agentsById[c.agentId];
 			const cu = customersById[c.customerId];
-			return a?.name.toLowerCase().includes(q) || cu?.name.toLowerCase().includes(q) || cu?.phone?.includes(q);
+			return a?.name.toLowerCase().includes(q) || cu?.name.toLowerCase().includes(q) || cu?.phone?.includes(q) || (c.notes || "").toLowerCase().includes(q);
 		});
 		if (callOutcome) list = list.filter((c) => c.outcome === callOutcome);
 		if (callAgent) list = list.filter((c) => c.agentId === callAgent);
@@ -495,61 +596,44 @@ function ZynloApp({ initial }) {
 		agentsById,
 		customersById
 	]);
+	const filteredMessages = (0, import_react.useMemo)(() => {
+		let list = [...messages];
+		const q = msgSearch.toLowerCase().trim();
+		if (q) list = list.filter((m) => {
+			const a = agentsById[m.agentId];
+			const cu = customersById[m.customerId];
+			return a?.name.toLowerCase().includes(q) || cu?.name.toLowerCase().includes(q) || (m.subject || "").toLowerCase().includes(q) || (m.body || "").toLowerCase().includes(q) || (m.notes || "").toLowerCase().includes(q);
+		});
+		if (msgChannel) list = list.filter((m) => m.channel === msgChannel);
+		if (msgStatus) list = list.filter((m) => m.status === msgStatus);
+		list.sort((a, b) => new Date(b.datetime).getTime() - new Date(a.datetime).getTime());
+		return list;
+	}, [
+		messages,
+		msgSearch,
+		msgChannel,
+		msgStatus,
+		agentsById,
+		customersById
+	]);
 	const filteredCustomers = (0, import_react.useMemo)(() => {
 		const q = customerSearch.toLowerCase().trim();
 		if (!q) return data.customers;
-		return data.customers.filter((c) => c.name.toLowerCase().includes(q) || c.phone.includes(q) || c.email.toLowerCase().includes(q) || c.company.toLowerCase().includes(q));
-	}, [data.customers, customerSearch]);
-	const clientCards = (0, import_react.useMemo)(() => {
-		const byName = {};
-		for (const cl of data.clients) byName[cl.name] = {
-			client: cl,
-			name: cl.name,
-			contacts: [],
-			calls: []
-		};
-		for (const cu of data.customers) {
-			const key = cu.company || cu.name;
-			if (!byName[key]) byName[key] = {
-				client: null,
-				name: key,
-				contacts: [],
-				calls: []
-			};
-			byName[key].contacts.push(cu);
-		}
-		for (const call of data.calls) {
-			const cl = call.clientId ? data.clients.find((c) => c.id === call.clientId) : null;
-			const cu = customersById[call.customerId];
-			const key = cl?.name || cu?.company || cu?.name || "Unknown";
-			if (!byName[key]) byName[key] = {
-				client: cl || null,
-				name: key,
-				contacts: [],
-				calls: []
-			};
-			byName[key].calls.push(call);
-		}
-		let list = Object.values(byName);
-		const q = clientSearch.toLowerCase().trim();
-		if (q) list = list.filter((c) => c.name.toLowerCase().includes(q) || c.contacts.some((x) => x.name.toLowerCase().includes(q)));
-		list.sort((a, b) => {
-			if (clientSort === "calls-asc") return a.calls.length - b.calls.length;
-			if (clientSort === "name-asc") return a.name.localeCompare(b.name);
-			if (clientSort === "name-desc") return b.name.localeCompare(a.name);
-			if (clientSort === "last-contact") {
-				const la = a.calls[0]?.datetime || "";
-				return (b.calls[0]?.datetime || "").localeCompare(la);
-			}
-			return b.calls.length - a.calls.length;
+		return data.customers.filter((c) => {
+			const clientName = c.clientId ? clientsById[c.clientId]?.name || "" : "";
+			const activityNotes = getCustomerStats(data, c.id).activityNotes || "";
+			return c.name.toLowerCase().includes(q) || c.phone.includes(q) || c.email.toLowerCase().includes(q) || c.company.toLowerCase().includes(q) || clientName.toLowerCase().includes(q) || activityNotes.toLowerCase().includes(q);
 		});
-		return list;
 	}, [
 		data,
-		clientSearch,
-		clientSort,
-		customersById
+		customerSearch,
+		clientsById
 	]);
+	const filteredClients = (0, import_react.useMemo)(() => {
+		const q = clientSearch.toLowerCase().trim();
+		if (!q) return data.clients;
+		return data.clients.filter((c) => c.name.toLowerCase().includes(q) || c.industry.toLowerCase().includes(q) || c.email.toLowerCase().includes(q) || c.phone.includes(q) || (c.notes || "").toLowerCase().includes(q));
+	}, [data.clients, clientSearch]);
 	function openModal(kind, id) {
 		setEditId(id || null);
 		setExportClientStep(false);
@@ -570,11 +654,37 @@ function ZynloApp({ initial }) {
 			datetime: localDatetimeValue(),
 			agentId: data.agents[0]?.id || "",
 			customerId: data.customers[0]?.id || "",
-			clientId: data.clients[0]?.id || "",
+			clientId: data.customers[0]?.clientId || data.clients[0]?.id || "",
 			type: "Inbound",
 			duration: "3",
 			outcome: "Resolved",
 			rating: "",
+			notes: ""
+		});
+		if (kind === "message") if (id) {
+			const m = messages.find((x) => x.id === id);
+			if (m) setMsgForm({
+				datetime: m.datetime.slice(0, 16),
+				agentId: m.agentId,
+				customerId: m.customerId,
+				clientId: m.clientId || "",
+				channel: m.channel,
+				direction: m.direction,
+				subject: m.subject || "",
+				body: m.body || "",
+				status: m.status,
+				notes: m.notes || ""
+			});
+		} else setMsgForm({
+			datetime: localDatetimeValue(),
+			agentId: data.agents[0]?.id || "",
+			customerId: data.customers[0]?.id || "",
+			clientId: data.customers[0]?.clientId || data.clients[0]?.id || "",
+			channel: "SMS",
+			direction: "Inbound",
+			subject: "",
+			body: "",
+			status: "Open",
 			notes: ""
 		});
 		if (kind === "agent") if (id) {
@@ -598,14 +708,14 @@ function ZynloApp({ initial }) {
 				phone: c.phone,
 				email: c.email,
 				company: c.company,
-				notes: c.notes
+				clientId: c.clientId || ""
 			});
 		} else setCustomerForm({
 			name: "",
 			phone: "",
 			email: "",
 			company: "",
-			notes: ""
+			clientId: ""
 		});
 		if (kind === "client") if (id) {
 			const c = data.clients.find((x) => x.id === id);
@@ -634,17 +744,22 @@ function ZynloApp({ initial }) {
 	async function onSaveCall(e) {
 		e.preventDefault();
 		if (!callForm.agentId || !callForm.customerId) {
-			toast("Add an agent and customer first");
+			toast("Add agent and customer first");
 			return;
 		}
 		setBusy(true);
 		try {
+			let clientId = callForm.clientId || null;
+			if (!clientId) {
+				const cu = customersById[callForm.customerId];
+				if (cu?.clientId) clientId = cu.clientId;
+			}
 			await saveCall({ data: {
 				id: editId || void 0,
 				datetime: callForm.datetime,
 				agentId: callForm.agentId,
 				customerId: callForm.customerId,
-				clientId: callForm.clientId || null,
+				clientId,
 				type: callForm.type,
 				duration: parseFloat(callForm.duration) || 0,
 				outcome: callForm.outcome,
@@ -656,6 +771,45 @@ function ZynloApp({ initial }) {
 			toast(editId ? "Call updated" : "Call logged");
 		} catch (err) {
 			toast(err instanceof Error ? err.message : "Failed to save call");
+		} finally {
+			setBusy(false);
+		}
+	}
+	async function onSaveMessage(e) {
+		e.preventDefault();
+		if (!msgForm.agentId || !msgForm.customerId) {
+			toast("Add agent and customer first");
+			return;
+		}
+		if (!msgForm.body.trim()) {
+			toast("Message body is required");
+			return;
+		}
+		setBusy(true);
+		try {
+			let clientId = msgForm.clientId || null;
+			if (!clientId) {
+				const cu = customersById[msgForm.customerId];
+				if (cu?.clientId) clientId = cu.clientId;
+			}
+			await saveMessage({ data: {
+				id: editId || void 0,
+				datetime: msgForm.datetime,
+				agentId: msgForm.agentId,
+				customerId: msgForm.customerId,
+				clientId,
+				channel: msgForm.channel,
+				direction: msgForm.direction,
+				subject: msgForm.subject,
+				body: msgForm.body,
+				status: msgForm.status,
+				notes: msgForm.notes
+			} });
+			await refresh();
+			setModal(null);
+			toast(editId ? "Message updated" : "Message logged");
+		} catch (err) {
+			toast(err instanceof Error ? err.message : "Failed to save message");
 		} finally {
 			setBusy(false);
 		}
@@ -684,13 +838,17 @@ function ZynloApp({ initial }) {
 		e.preventDefault();
 		setBusy(true);
 		try {
+			const clientId = customerForm.clientId || null;
+			let company = customerForm.company;
+			if (clientId && clientsById[clientId] && !company) company = clientsById[clientId].name;
 			await saveCustomer({ data: {
 				id: editId || void 0,
 				name: customerForm.name,
 				phone: customerForm.phone,
 				email: customerForm.email,
-				company: customerForm.company,
-				notes: customerForm.notes
+				company,
+				clientId,
+				notes: ""
 			} });
 			await refresh();
 			setModal(null);
@@ -757,7 +915,18 @@ function ZynloApp({ initial }) {
 			c.rating ?? "",
 			c.notes
 		].map(escapeCsv).join(",")).join("\n"), `zynlo_calls_${date}.csv`, "text/csv");
-		else if (type === "agents") downloadText("Name,Email,Role,Status,Total Calls,Resolution %,Avg Duration,QA Score\n" + data.agents.map((a) => {
+		else if (type === "messages") downloadText("Datetime,Agent,Customer,Channel,Direction,Subject,Body,Status,Notes\n" + messages.map((m) => [
+			m.datetime,
+			agentsById[m.agentId]?.name || "",
+			customersById[m.customerId]?.name || "",
+			m.channel,
+			m.direction,
+			m.subject,
+			m.body,
+			m.status,
+			m.notes
+		].map(escapeCsv).join(",")).join("\n"), `zynlo_messages_${date}.csv`, "text/csv");
+		else if (type === "agents") downloadText("Name,Email,Role,Status,Total Calls,Messages,Resolution %,Avg Duration,QA Score\n" + data.agents.map((a) => {
 			const s = getAgentStats(data, a.id);
 			return [
 				a.name,
@@ -765,66 +934,41 @@ function ZynloApp({ initial }) {
 				a.role,
 				a.status,
 				s.total,
+				s.messages,
 				Math.round(s.resolutionRate * 100),
 				s.avgDuration.toFixed(1),
 				s.csat ? s.csat.toFixed(1) : ""
 			].map(escapeCsv).join(",");
 		}).join("\n"), `zynlo_agents_${date}.csv`, "text/csv");
-		else if (type === "customers") downloadText("Name,Phone,Email,Company,Total Calls,Last Contact,Notes\n" + data.customers.map((c) => {
+		else if (type === "customers") downloadText("Name,Phone,Email,Client,Company,Calls,Messages,Notes,Last Contact\n" + data.customers.map((c) => {
 			const s = getCustomerStats(data, c.id);
 			return [
 				c.name,
 				c.phone,
 				c.email,
+				c.clientId ? clientsById[c.clientId]?.name || "" : "",
 				c.company,
 				s.total,
-				s.lastCall ? formatDate(s.lastCall.datetime) : "",
-				c.notes
+				s.messages,
+				s.activityNotes,
+				s.lastContact ? formatDate(s.lastContact) : ""
 			].map(escapeCsv).join(",");
 		}).join("\n"), `zynlo_customers_${date}.csv`, "text/csv");
+		else if (type === "clients") downloadText("Company,Industry,Phone,Email,Status,Contacts,Calls,Messages,Notes\n" + data.clients.map((c) => {
+			const s = getClientStats(data, c.id);
+			return [
+				c.name,
+				c.industry,
+				c.phone,
+				c.email,
+				c.status,
+				s.contacts,
+				s.calls,
+				s.messages,
+				c.notes
+			].map(escapeCsv).join(",");
+		}).join("\n"), `zynlo_clients_${date}.csv`, "text/csv");
 		else if (type === "json") downloadText(JSON.stringify(data, null, 2), `zynlo_backup_${date}.json`, "application/json");
-		else if (type === "clients") {
-			const header = "Company,Contact Name,Phone,Email,Total Calls,Resolved,Escalated,Avg Duration,QA Score,Last Contact,Notes\n";
-			const rows = [];
-			for (const card of clientCards) {
-				if (exportClientName && card.name !== exportClientName) continue;
-				const contacts = card.contacts.length > 0 ? card.contacts : [{
-					id: "",
-					name: "—",
-					phone: "",
-					email: "",
-					company: card.name,
-					notes: ""
-				}];
-				for (const contact of contacts) {
-					const related = data.calls.filter((c) => c.customerId === contact.id || card.client && c.clientId === card.client.id);
-					const resolved = related.filter((c) => c.outcome === "Resolved").length;
-					const escalated = related.filter((c) => c.outcome === "Escalated").length;
-					const avg = related.length ? related.reduce((s, c) => s + c.duration, 0) / related.length : 0;
-					const rated = related.filter((c) => c.rating != null);
-					const qa = rated.length ? rated.reduce((s, c) => s + (c.rating || 0), 0) / rated.length : 0;
-					const last = related.sort((a, b) => new Date(b.datetime).getTime() - new Date(a.datetime).getTime())[0];
-					rows.push([
-						card.name,
-						contact.name,
-						contact.phone,
-						contact.email,
-						related.length,
-						resolved,
-						escalated,
-						formatDuration(avg),
-						qa ? qa.toFixed(1) : "",
-						last ? formatDate(last.datetime) : "",
-						contact.notes
-					].map(escapeCsv).join(","));
-				}
-			}
-			if (!rows.length) {
-				toast("No client data to export");
-				return;
-			}
-			downloadText(header + rows.join("\n"), `zynlo_clients_${exportClientName ? exportClientName.replace(/\\s+/g, "_") : "all"}_${date}.csv`, "text/csv");
-		}
 		toast("Export ready");
 		setModal(null);
 	}
@@ -832,7 +976,8 @@ function ZynloApp({ initial }) {
 		setSection(id);
 		setSidebarOpen(false);
 	};
-	const recent = data.calls.slice().sort((a, b) => new Date(b.datetime).getTime() - new Date(a.datetime).getTime()).slice(0, 10);
+	const recent = data.calls.slice().sort((a, b) => new Date(b.datetime).getTime() - new Date(a.datetime).getTime()).slice(0, 8);
+	const recentMsgs = messages.slice().sort((a, b) => new Date(b.datetime).getTime() - new Date(a.datetime).getTime()).slice(0, 5);
 	return /* @__PURE__ */ (0, import_jsx_runtime.jsxs)("div", {
 		className: "flex min-h-screen bg-bg text-fg",
 		children: [
@@ -880,13 +1025,18 @@ function ZynloApp({ initial }) {
 							onPrimary: () => openModal("call")
 						}),
 						/* @__PURE__ */ (0, import_jsx_runtime.jsxs)("div", {
-							className: "grid grid-cols-1 gap-3 sm:grid-cols-2 xl:grid-cols-4",
+							className: "grid grid-cols-1 gap-3 sm:grid-cols-2 xl:grid-cols-5",
 							children: [
 								/* @__PURE__ */ (0, import_jsx_runtime.jsx)(Kpi, {
 									icon: /* @__PURE__ */ (0, import_jsx_runtime.jsx)(Phone, { className: "h-5 w-5" }),
-									label: "Total Calls Today",
+									label: "Calls Today",
 									value: String(kpis.totalToday),
 									sub: `${kpis.delta >= 0 ? "+" : ""}${kpis.delta} vs yesterday`
+								}),
+								/* @__PURE__ */ (0, import_jsx_runtime.jsx)(Kpi, {
+									icon: /* @__PURE__ */ (0, import_jsx_runtime.jsx)(MessageSquare, { className: "h-5 w-5" }),
+									label: "Messages Today",
+									value: String(kpis.msgsToday)
 								}),
 								/* @__PURE__ */ (0, import_jsx_runtime.jsx)(Kpi, {
 									icon: /* @__PURE__ */ (0, import_jsx_runtime.jsx)(ChartColumn, { className: "h-5 w-5" }),
@@ -897,8 +1047,7 @@ function ZynloApp({ initial }) {
 								/* @__PURE__ */ (0, import_jsx_runtime.jsx)(Kpi, {
 									icon: /* @__PURE__ */ (0, import_jsx_runtime.jsx)(ClipboardList, { className: "h-5 w-5" }),
 									label: "Avg Handle Time",
-									value: formatDuration(kpis.aht),
-									sub: "Target: under 5m"
+									value: formatDuration(kpis.aht)
 								}),
 								/* @__PURE__ */ (0, import_jsx_runtime.jsx)(Kpi, {
 									icon: /* @__PURE__ */ (0, import_jsx_runtime.jsx)(Star, { className: "h-5 w-5" }),
@@ -963,22 +1112,70 @@ function ZynloApp({ initial }) {
 								})
 							})] })]
 						}),
-						/* @__PURE__ */ (0, import_jsx_runtime.jsxs)(Card, { children: [/* @__PURE__ */ (0, import_jsx_runtime.jsx)(CardHeader, {
-							title: "Recent Calls",
-							action: /* @__PURE__ */ (0, import_jsx_runtime.jsx)(Btn, {
-								variant: "secondary",
-								size: "sm",
-								onClick: () => go("calls"),
-								children: "View All"
-							})
-						}), /* @__PURE__ */ (0, import_jsx_runtime.jsx)(CallsTable, {
-							calls: recent,
-							agents: agentsById,
-							customers: customersById,
-							onEdit: (id) => openModal("call", id),
-							onDelete: (id) => askDelete("Delete Call?", "This call will be removed.", () => deleteCall({ data: { id } }).then(() => void 0)),
-							compact: true
-						})] })
+						/* @__PURE__ */ (0, import_jsx_runtime.jsxs)("div", {
+							className: "grid grid-cols-1 gap-6 lg:grid-cols-2",
+							children: [/* @__PURE__ */ (0, import_jsx_runtime.jsxs)(Card, { children: [/* @__PURE__ */ (0, import_jsx_runtime.jsx)(CardHeader, {
+								title: "Recent Calls",
+								action: /* @__PURE__ */ (0, import_jsx_runtime.jsx)(Btn, {
+									variant: "secondary",
+									size: "sm",
+									onClick: () => go("calls"),
+									children: "View All"
+								})
+							}), /* @__PURE__ */ (0, import_jsx_runtime.jsx)(CallsTable, {
+								calls: recent,
+								agents: agentsById,
+								customers: customersById,
+								onEdit: (id) => openModal("call", id),
+								onDelete: (id) => askDelete("Delete Call?", "Delete this call?", () => deleteCall({ data: { id } }).then(() => void 0)),
+								compact: true
+							})] }), /* @__PURE__ */ (0, import_jsx_runtime.jsxs)(Card, { children: [/* @__PURE__ */ (0, import_jsx_runtime.jsx)(CardHeader, {
+								title: "Recent Messages",
+								action: /* @__PURE__ */ (0, import_jsx_runtime.jsx)(Btn, {
+									variant: "secondary",
+									size: "sm",
+									onClick: () => go("messages"),
+									children: "View All"
+								})
+							}), recentMsgs.length === 0 ? /* @__PURE__ */ (0, import_jsx_runtime.jsx)("div", {
+								className: "px-6 py-10 text-center text-sm text-muted",
+								children: "No messages yet."
+							}) : /* @__PURE__ */ (0, import_jsx_runtime.jsx)("div", {
+								className: "divide-y divide-border",
+								children: recentMsgs.map((m) => /* @__PURE__ */ (0, import_jsx_runtime.jsxs)("button", {
+									type: "button",
+									className: "flex w-full flex-col gap-1 px-5 py-3 text-left hover:bg-purple-50/60",
+									onClick: () => openModal("message", m.id),
+									children: [
+										/* @__PURE__ */ (0, import_jsx_runtime.jsxs)("div", {
+											className: "flex flex-wrap items-center gap-2 text-sm",
+											children: [
+												/* @__PURE__ */ (0, import_jsx_runtime.jsx)(Badge, {
+													tone: "soft",
+													children: m.channel
+												}),
+												/* @__PURE__ */ (0, import_jsx_runtime.jsx)("span", {
+													className: "font-semibold",
+													children: customersById[m.customerId]?.name || "Unknown"
+												}),
+												/* @__PURE__ */ (0, import_jsx_runtime.jsx)("span", {
+													className: "text-xs text-muted",
+													children: formatDate(m.datetime)
+												})
+											]
+										}),
+										/* @__PURE__ */ (0, import_jsx_runtime.jsxs)("div", {
+											className: "line-clamp-2 text-xs text-muted",
+											children: [m.subject ? `${m.subject}: ` : "", m.body]
+										}),
+										m.notes ? /* @__PURE__ */ (0, import_jsx_runtime.jsxs)("div", {
+											className: "text-[11px] text-primary",
+											children: ["Note: ", shortNotes(m.notes, 80)]
+										}) : null
+									]
+								}, m.id))
+							})] })]
+						})
 					] }),
 					section === "calls" && /* @__PURE__ */ (0, import_jsx_runtime.jsxs)(SectionView, { children: [
 						/* @__PURE__ */ (0, import_jsx_runtime.jsx)(Header, {
@@ -991,7 +1188,7 @@ function ZynloApp({ initial }) {
 							/* @__PURE__ */ (0, import_jsx_runtime.jsx)(SearchBox, {
 								value: callSearch,
 								onChange: setCallSearch,
-								placeholder: "Search calls..."
+								placeholder: "Search..."
 							}),
 							/* @__PURE__ */ (0, import_jsx_runtime.jsxs)("select", {
 								className: "w-full rounded-[10px] border border-border bg-white px-3.5 py-2.5 text-sm text-fg outline-none transition focus:border-primary focus:shadow-[0_0_0_3px_rgba(167,67,255,0.12)] w-auto min-w-[140px]",
@@ -1021,14 +1218,183 @@ function ZynloApp({ initial }) {
 						/* @__PURE__ */ (0, import_jsx_runtime.jsx)(Card, { children: data.calls.length === 0 ? /* @__PURE__ */ (0, import_jsx_runtime.jsx)(EmptyState, {
 							icon: /* @__PURE__ */ (0, import_jsx_runtime.jsx)(Phone, { className: "h-12 w-12" }),
 							title: "No calls yet",
-							description: "Log your first call to start tracking."
+							description: "Log your first call to get started."
 						}) : /* @__PURE__ */ (0, import_jsx_runtime.jsx)(CallsTable, {
 							calls: filteredCalls,
 							agents: agentsById,
 							customers: customersById,
 							onEdit: (id) => openModal("call", id),
-							onDelete: (id) => askDelete("Delete Call?", "This call will be removed.", () => deleteCall({ data: { id } }).then(() => void 0))
+							onDelete: (id) => askDelete("Delete Call?", "Delete this call?", () => deleteCall({ data: { id } }).then(() => void 0))
 						}) })
+					] }),
+					section === "messages" && /* @__PURE__ */ (0, import_jsx_runtime.jsxs)(SectionView, { children: [
+						/* @__PURE__ */ (0, import_jsx_runtime.jsx)(Header, {
+							title: "Messages",
+							onExport: () => openModal("export"),
+							primaryLabel: "Log Message",
+							onPrimary: () => openModal("message")
+						}),
+						/* @__PURE__ */ (0, import_jsx_runtime.jsxs)(Toolbar, { children: [
+							/* @__PURE__ */ (0, import_jsx_runtime.jsx)(SearchBox, {
+								value: msgSearch,
+								onChange: setMsgSearch,
+								placeholder: "Search..."
+							}),
+							/* @__PURE__ */ (0, import_jsx_runtime.jsxs)("select", {
+								className: "w-full rounded-[10px] border border-border bg-white px-3.5 py-2.5 text-sm text-fg outline-none transition focus:border-primary focus:shadow-[0_0_0_3px_rgba(167,67,255,0.12)] w-auto min-w-[130px]",
+								value: msgChannel,
+								onChange: (e) => setMsgChannel(e.target.value),
+								children: [/* @__PURE__ */ (0, import_jsx_runtime.jsx)("option", {
+									value: "",
+									children: "All Channels"
+								}), MESSAGE_CHANNELS.map((c) => /* @__PURE__ */ (0, import_jsx_runtime.jsx)("option", {
+									value: c,
+									children: c
+								}, c))]
+							}),
+							/* @__PURE__ */ (0, import_jsx_runtime.jsxs)("select", {
+								className: "w-full rounded-[10px] border border-border bg-white px-3.5 py-2.5 text-sm text-fg outline-none transition focus:border-primary focus:shadow-[0_0_0_3px_rgba(167,67,255,0.12)] w-auto min-w-[130px]",
+								value: msgStatus,
+								onChange: (e) => setMsgStatus(e.target.value),
+								children: [/* @__PURE__ */ (0, import_jsx_runtime.jsx)("option", {
+									value: "",
+									children: "All Statuses"
+								}), MESSAGE_STATUSES.map((s) => /* @__PURE__ */ (0, import_jsx_runtime.jsx)("option", {
+									value: s,
+									children: s
+								}, s))]
+							})
+						] }),
+						/* @__PURE__ */ (0, import_jsx_runtime.jsx)(Card, { children: messages.length === 0 ? /* @__PURE__ */ (0, import_jsx_runtime.jsx)(EmptyState, {
+							icon: /* @__PURE__ */ (0, import_jsx_runtime.jsx)(MessageSquare, { className: "h-12 w-12" }),
+							title: "No messages yet",
+							description: "Log SMS, chat, or email conversations."
+						}) : /* @__PURE__ */ (0, import_jsx_runtime.jsxs)(import_jsx_runtime.Fragment, { children: [/* @__PURE__ */ (0, import_jsx_runtime.jsx)("div", {
+							className: "hidden overflow-x-auto md:block",
+							children: /* @__PURE__ */ (0, import_jsx_runtime.jsxs)("table", {
+								className: "w-full text-sm",
+								children: [/* @__PURE__ */ (0, import_jsx_runtime.jsx)("thead", { children: /* @__PURE__ */ (0, import_jsx_runtime.jsxs)("tr", {
+									className: "bg-purple-50 text-left text-[11px] font-semibold uppercase tracking-wide text-muted",
+									children: [
+										/* @__PURE__ */ (0, import_jsx_runtime.jsx)("th", {
+											className: "px-4 py-3",
+											children: "Time"
+										}),
+										/* @__PURE__ */ (0, import_jsx_runtime.jsx)("th", {
+											className: "px-4 py-3",
+											children: "Channel"
+										}),
+										/* @__PURE__ */ (0, import_jsx_runtime.jsx)("th", {
+											className: "px-4 py-3",
+											children: "Dir"
+										}),
+										/* @__PURE__ */ (0, import_jsx_runtime.jsx)("th", {
+											className: "px-4 py-3",
+											children: "Agent"
+										}),
+										/* @__PURE__ */ (0, import_jsx_runtime.jsx)("th", {
+											className: "px-4 py-3",
+											children: "Customer"
+										}),
+										/* @__PURE__ */ (0, import_jsx_runtime.jsx)("th", {
+											className: "px-4 py-3",
+											children: "Message"
+										}),
+										/* @__PURE__ */ (0, import_jsx_runtime.jsx)("th", {
+											className: "px-4 py-3",
+											children: "Status"
+										}),
+										/* @__PURE__ */ (0, import_jsx_runtime.jsx)("th", {
+											className: "px-4 py-3",
+											children: "Notes"
+										}),
+										/* @__PURE__ */ (0, import_jsx_runtime.jsx)("th", {
+											className: "px-4 py-3",
+											children: "Actions"
+										})
+									]
+								}) }), /* @__PURE__ */ (0, import_jsx_runtime.jsx)("tbody", { children: filteredMessages.map((m) => {
+									const a = agentsById[m.agentId];
+									const cu = customersById[m.customerId];
+									return /* @__PURE__ */ (0, import_jsx_runtime.jsxs)("tr", {
+										className: "border-t border-border hover:bg-purple-50/60",
+										children: [
+											/* @__PURE__ */ (0, import_jsx_runtime.jsx)("td", {
+												className: "whitespace-nowrap px-4 py-3",
+												children: formatDate(m.datetime)
+											}),
+											/* @__PURE__ */ (0, import_jsx_runtime.jsx)("td", {
+												className: "px-4 py-3",
+												children: /* @__PURE__ */ (0, import_jsx_runtime.jsx)(Badge, {
+													tone: "soft",
+													children: m.channel
+												})
+											}),
+											/* @__PURE__ */ (0, import_jsx_runtime.jsx)("td", {
+												className: "px-4 py-3 text-xs",
+												children: m.direction
+											}),
+											/* @__PURE__ */ (0, import_jsx_runtime.jsx)("td", {
+												className: "px-4 py-3",
+												children: a?.name || "-"
+											}),
+											/* @__PURE__ */ (0, import_jsx_runtime.jsx)("td", {
+												className: "px-4 py-3 font-medium",
+												children: cu?.name || "-"
+											}),
+											/* @__PURE__ */ (0, import_jsx_runtime.jsxs)("td", {
+												className: "max-w-[220px] px-4 py-3",
+												children: [m.subject ? /* @__PURE__ */ (0, import_jsx_runtime.jsx)("div", {
+													className: "text-xs font-semibold",
+													children: m.subject
+												}) : null, /* @__PURE__ */ (0, import_jsx_runtime.jsx)("div", {
+													className: "truncate text-xs text-muted",
+													children: m.body
+												})]
+											}),
+											/* @__PURE__ */ (0, import_jsx_runtime.jsx)("td", {
+												className: "px-4 py-3",
+												children: /* @__PURE__ */ (0, import_jsx_runtime.jsx)(Badge, {
+													tone: msgStatusTone(m.status),
+													children: m.status
+												})
+											}),
+											/* @__PURE__ */ (0, import_jsx_runtime.jsx)("td", {
+												className: "max-w-[140px] truncate px-4 py-3 text-xs text-muted",
+												title: m.notes || void 0,
+												children: shortNotes(m.notes)
+											}),
+											/* @__PURE__ */ (0, import_jsx_runtime.jsx)("td", {
+												className: "px-4 py-3",
+												children: /* @__PURE__ */ (0, import_jsx_runtime.jsx)(RowActions, {
+													onEdit: () => openModal("message", m.id),
+													onDelete: () => askDelete("Delete Message?", "Delete this message?", () => deleteMessage({ data: { id: m.id } }).then(() => void 0))
+												})
+											})
+										]
+									}, m.id);
+								}) })]
+							})
+						}), /* @__PURE__ */ (0, import_jsx_runtime.jsx)("div", {
+							className: "space-y-3 p-4 md:hidden",
+							children: filteredMessages.map((m) => {
+								const a = agentsById[m.agentId];
+								const cu = customersById[m.customerId];
+								return /* @__PURE__ */ (0, import_jsx_runtime.jsx)(MobileCard, {
+									title: cu?.name || "Unknown",
+									subtitle: `${m.channel} · ${formatDate(m.datetime)}`,
+									rows: [
+										["Direction", m.direction],
+										["Agent", a?.name || "-"],
+										["Message", shortNotes(m.body, 80)],
+										["Status", m.status],
+										["Notes", shortNotes(m.notes, 80)]
+									],
+									onEdit: () => openModal("message", m.id),
+									onDelete: () => askDelete("Delete Message?", "Delete this message?", () => deleteMessage({ data: { id: m.id } }).then(() => void 0))
+								}, m.id);
+							})
+						})] }) })
 					] }),
 					section === "agents" && /* @__PURE__ */ (0, import_jsx_runtime.jsxs)(SectionView, { children: [/* @__PURE__ */ (0, import_jsx_runtime.jsx)(Header, {
 						title: "Agents",
@@ -1038,7 +1404,7 @@ function ZynloApp({ initial }) {
 					}), /* @__PURE__ */ (0, import_jsx_runtime.jsx)(Card, { children: data.agents.length === 0 ? /* @__PURE__ */ (0, import_jsx_runtime.jsx)(EmptyState, {
 						icon: /* @__PURE__ */ (0, import_jsx_runtime.jsx)(Users, { className: "h-12 w-12" }),
 						title: "No agents yet",
-						description: "Add agents who handle customer calls."
+						description: "Add your first agent."
 					}) : /* @__PURE__ */ (0, import_jsx_runtime.jsxs)(import_jsx_runtime.Fragment, { children: [/* @__PURE__ */ (0, import_jsx_runtime.jsx)("div", {
 						className: "hidden overflow-x-auto md:block",
 						children: /* @__PURE__ */ (0, import_jsx_runtime.jsxs)("table", {
@@ -1057,6 +1423,10 @@ function ZynloApp({ initial }) {
 									/* @__PURE__ */ (0, import_jsx_runtime.jsx)("th", {
 										className: "px-4 py-3",
 										children: "Calls"
+									}),
+									/* @__PURE__ */ (0, import_jsx_runtime.jsx)("th", {
+										className: "px-4 py-3",
+										children: "Msgs"
 									}),
 									/* @__PURE__ */ (0, import_jsx_runtime.jsx)("th", {
 										className: "px-4 py-3",
@@ -1094,7 +1464,7 @@ function ZynloApp({ initial }) {
 													children: a.name
 												}), /* @__PURE__ */ (0, import_jsx_runtime.jsx)("div", {
 													className: "text-xs text-muted",
-													children: a.email || "—"
+													children: a.email || "-"
 												})] })]
 											})
 										}),
@@ -1105,6 +1475,10 @@ function ZynloApp({ initial }) {
 										/* @__PURE__ */ (0, import_jsx_runtime.jsx)("td", {
 											className: "px-4 py-3 font-semibold",
 											children: s.total
+										}),
+										/* @__PURE__ */ (0, import_jsx_runtime.jsx)("td", {
+											className: "px-4 py-3",
+											children: s.messages
 										}),
 										/* @__PURE__ */ (0, import_jsx_runtime.jsx)("td", {
 											className: "px-4 py-3",
@@ -1131,7 +1505,7 @@ function ZynloApp({ initial }) {
 											children: s.csat ? /* @__PURE__ */ (0, import_jsx_runtime.jsxs)("span", {
 												className: "text-primary",
 												children: ["★ ", s.csat.toFixed(1)]
-											}) : "—"
+											}) : "-"
 										}),
 										/* @__PURE__ */ (0, import_jsx_runtime.jsx)("td", {
 											className: "px-4 py-3",
@@ -1144,7 +1518,7 @@ function ZynloApp({ initial }) {
 											className: "px-4 py-3",
 											children: /* @__PURE__ */ (0, import_jsx_runtime.jsx)(RowActions, {
 												onEdit: () => openModal("agent", a.id),
-												onDelete: () => askDelete("Delete Agent?", "This agent and their calls will be removed.", () => deleteAgent({ data: { id: a.id } }).then(() => void 0))
+												onDelete: () => askDelete("Delete Agent?", "Delete this agent?", () => deleteAgent({ data: { id: a.id } }).then(() => void 0))
 											})
 										})
 									]
@@ -1161,12 +1535,12 @@ function ZynloApp({ initial }) {
 								subtitle: `${a.role} · ${a.status}`,
 								rows: [
 									["Calls", String(s.total)],
+									["Messages", String(s.messages)],
 									["Avg Time", formatDuration(s.avgDuration)],
-									["Resolution", `${rate}%`],
-									["QA", s.csat ? s.csat.toFixed(1) : "—"]
+									["Resolution", `${rate}%`]
 								],
 								onEdit: () => openModal("agent", a.id),
-								onDelete: () => askDelete("Delete Agent?", "This agent and their calls will be removed.", () => deleteAgent({ data: { id: a.id } }).then(() => void 0))
+								onDelete: () => askDelete("Delete Agent?", "Delete this agent?", () => deleteAgent({ data: { id: a.id } }).then(() => void 0))
 							}, a.id);
 						})
 					})] }) })] }),
@@ -1180,12 +1554,12 @@ function ZynloApp({ initial }) {
 						/* @__PURE__ */ (0, import_jsx_runtime.jsx)(Toolbar, { children: /* @__PURE__ */ (0, import_jsx_runtime.jsx)(SearchBox, {
 							value: customerSearch,
 							onChange: setCustomerSearch,
-							placeholder: "Search customers..."
+							placeholder: "Search..."
 						}) }),
 						/* @__PURE__ */ (0, import_jsx_runtime.jsx)(Card, { children: data.customers.length === 0 ? /* @__PURE__ */ (0, import_jsx_runtime.jsx)(EmptyState, {
 							icon: /* @__PURE__ */ (0, import_jsx_runtime.jsx)(UserRound, { className: "h-12 w-12" }),
 							title: "No customers yet",
-							description: "Add customers to track interaction history."
+							description: "Add your first customer."
 						}) : /* @__PURE__ */ (0, import_jsx_runtime.jsxs)(import_jsx_runtime.Fragment, { children: [/* @__PURE__ */ (0, import_jsx_runtime.jsx)("div", {
 							className: "hidden overflow-x-auto md:block",
 							children: /* @__PURE__ */ (0, import_jsx_runtime.jsxs)("table", {
@@ -1207,11 +1581,19 @@ function ZynloApp({ initial }) {
 										}),
 										/* @__PURE__ */ (0, import_jsx_runtime.jsx)("th", {
 											className: "px-4 py-3",
-											children: "Company"
+											children: "Client"
 										}),
 										/* @__PURE__ */ (0, import_jsx_runtime.jsx)("th", {
 											className: "px-4 py-3",
 											children: "Calls"
+										}),
+										/* @__PURE__ */ (0, import_jsx_runtime.jsx)("th", {
+											className: "px-4 py-3",
+											children: "Msgs"
+										}),
+										/* @__PURE__ */ (0, import_jsx_runtime.jsx)("th", {
+											className: "px-4 py-3",
+											children: "Notes"
 										}),
 										/* @__PURE__ */ (0, import_jsx_runtime.jsx)("th", {
 											className: "px-4 py-3",
@@ -1237,11 +1619,11 @@ function ZynloApp({ initial }) {
 											}),
 											/* @__PURE__ */ (0, import_jsx_runtime.jsx)("td", {
 												className: "px-4 py-3",
-												children: c.email || "—"
+												children: c.email || "-"
 											}),
 											/* @__PURE__ */ (0, import_jsx_runtime.jsx)("td", {
 												className: "px-4 py-3",
-												children: c.company || "—"
+												children: customerCompanyLabel(c, clientsById)
 											}),
 											/* @__PURE__ */ (0, import_jsx_runtime.jsx)("td", {
 												className: "px-4 py-3 font-semibold",
@@ -1249,13 +1631,22 @@ function ZynloApp({ initial }) {
 											}),
 											/* @__PURE__ */ (0, import_jsx_runtime.jsx)("td", {
 												className: "px-4 py-3",
-												children: s.lastCall ? formatDate(s.lastCall.datetime) : "Never"
+												children: s.messages
+											}),
+											/* @__PURE__ */ (0, import_jsx_runtime.jsx)("td", {
+												className: "max-w-[200px] truncate px-4 py-3 text-xs text-muted",
+												title: s.activityNotes || void 0,
+												children: shortNotes(s.activityNotes)
+											}),
+											/* @__PURE__ */ (0, import_jsx_runtime.jsx)("td", {
+												className: "px-4 py-3",
+												children: s.lastContact ? formatDate(s.lastContact) : "Never"
 											}),
 											/* @__PURE__ */ (0, import_jsx_runtime.jsx)("td", {
 												className: "px-4 py-3",
 												children: /* @__PURE__ */ (0, import_jsx_runtime.jsx)(RowActions, {
 													onEdit: () => openModal("customer", c.id),
-													onDelete: () => askDelete("Delete Customer?", "This customer and their calls will be removed.", () => deleteCustomer({ data: { id: c.id } }).then(() => void 0))
+													onDelete: () => askDelete("Delete Customer?", "Delete this customer?", () => deleteCustomer({ data: { id: c.id } }).then(() => void 0))
 												})
 											})
 										]
@@ -1270,13 +1661,158 @@ function ZynloApp({ initial }) {
 									title: c.name,
 									subtitle: c.phone,
 									rows: [
-										["Email", c.email || "—"],
-										["Company", c.company || "—"],
+										["Email", c.email || "-"],
+										["Client", customerCompanyLabel(c, clientsById)],
 										["Calls", String(s.total)],
-										["Last", s.lastCall ? formatDate(s.lastCall.datetime) : "Never"]
+										["Messages", String(s.messages)],
+										["Notes", shortNotes(s.activityNotes, 80)],
+										["Last", s.lastContact ? formatDate(s.lastContact) : "Never"]
 									],
 									onEdit: () => openModal("customer", c.id),
-									onDelete: () => askDelete("Delete Customer?", "This customer and their calls will be removed.", () => deleteCustomer({ data: { id: c.id } }).then(() => void 0))
+									onDelete: () => askDelete("Delete Customer?", "Delete this customer?", () => deleteCustomer({ data: { id: c.id } }).then(() => void 0))
+								}, c.id);
+							})
+						})] }) })
+					] }),
+					section === "clients" && /* @__PURE__ */ (0, import_jsx_runtime.jsxs)(SectionView, { children: [
+						/* @__PURE__ */ (0, import_jsx_runtime.jsx)(Header, {
+							title: "Clients",
+							onExport: () => openModal("export"),
+							primaryLabel: "Add Client",
+							onPrimary: () => openModal("client")
+						}),
+						/* @__PURE__ */ (0, import_jsx_runtime.jsx)(Toolbar, { children: /* @__PURE__ */ (0, import_jsx_runtime.jsx)(SearchBox, {
+							value: clientSearch,
+							onChange: setClientSearch,
+							placeholder: "Search..."
+						}) }),
+						/* @__PURE__ */ (0, import_jsx_runtime.jsx)(Card, { children: data.clients.length === 0 ? /* @__PURE__ */ (0, import_jsx_runtime.jsx)(EmptyState, {
+							icon: /* @__PURE__ */ (0, import_jsx_runtime.jsx)(Building2, { className: "h-12 w-12" }),
+							title: "No clients yet",
+							description: "Add your first client."
+						}) : /* @__PURE__ */ (0, import_jsx_runtime.jsxs)(import_jsx_runtime.Fragment, { children: [/* @__PURE__ */ (0, import_jsx_runtime.jsx)("div", {
+							className: "hidden overflow-x-auto md:block",
+							children: /* @__PURE__ */ (0, import_jsx_runtime.jsxs)("table", {
+								className: "w-full text-sm",
+								children: [/* @__PURE__ */ (0, import_jsx_runtime.jsx)("thead", { children: /* @__PURE__ */ (0, import_jsx_runtime.jsxs)("tr", {
+									className: "bg-purple-50 text-left text-[11px] font-semibold uppercase tracking-wide text-muted",
+									children: [
+										/* @__PURE__ */ (0, import_jsx_runtime.jsx)("th", {
+											className: "px-4 py-3",
+											children: "Company"
+										}),
+										/* @__PURE__ */ (0, import_jsx_runtime.jsx)("th", {
+											className: "px-4 py-3",
+											children: "Notes"
+										}),
+										/* @__PURE__ */ (0, import_jsx_runtime.jsx)("th", {
+											className: "px-4 py-3",
+											children: "Industry"
+										}),
+										/* @__PURE__ */ (0, import_jsx_runtime.jsx)("th", {
+											className: "px-4 py-3",
+											children: "Status"
+										}),
+										/* @__PURE__ */ (0, import_jsx_runtime.jsx)("th", {
+											className: "px-4 py-3",
+											children: "Phone"
+										}),
+										/* @__PURE__ */ (0, import_jsx_runtime.jsx)("th", {
+											className: "px-4 py-3",
+											children: "Contacts"
+										}),
+										/* @__PURE__ */ (0, import_jsx_runtime.jsx)("th", {
+											className: "px-4 py-3",
+											children: "Calls"
+										}),
+										/* @__PURE__ */ (0, import_jsx_runtime.jsx)("th", {
+											className: "px-4 py-3",
+											children: "Msgs"
+										}),
+										/* @__PURE__ */ (0, import_jsx_runtime.jsx)("th", {
+											className: "px-4 py-3",
+											children: "Actions"
+										})
+									]
+								}) }), /* @__PURE__ */ (0, import_jsx_runtime.jsx)("tbody", { children: filteredClients.map((c) => {
+									const s = getClientStats(data, c.id);
+									return /* @__PURE__ */ (0, import_jsx_runtime.jsxs)("tr", {
+										className: "border-t border-border hover:bg-purple-50/60",
+										children: [
+											/* @__PURE__ */ (0, import_jsx_runtime.jsxs)("td", {
+												className: "px-4 py-3",
+												children: [/* @__PURE__ */ (0, import_jsx_runtime.jsx)("div", {
+													className: "font-semibold",
+													children: c.name
+												}), c.email ? /* @__PURE__ */ (0, import_jsx_runtime.jsx)("div", {
+													className: "text-xs text-muted",
+													children: c.email
+												}) : null]
+											}),
+											/* @__PURE__ */ (0, import_jsx_runtime.jsx)("td", {
+												className: "min-w-[160px] max-w-[280px] px-4 py-3 text-sm",
+												children: c.notes?.trim() ? /* @__PURE__ */ (0, import_jsx_runtime.jsx)("span", {
+													className: "line-clamp-3 whitespace-pre-wrap",
+													children: c.notes
+												}) : /* @__PURE__ */ (0, import_jsx_runtime.jsx)("span", {
+													className: "text-muted",
+													children: "-"
+												})
+											}),
+											/* @__PURE__ */ (0, import_jsx_runtime.jsx)("td", {
+												className: "px-4 py-3",
+												children: c.industry || "-"
+											}),
+											/* @__PURE__ */ (0, import_jsx_runtime.jsx)("td", {
+												className: "px-4 py-3",
+												children: /* @__PURE__ */ (0, import_jsx_runtime.jsx)(Badge, {
+													tone: c.status === "Active" ? "strong" : "soft",
+													children: c.status
+												})
+											}),
+											/* @__PURE__ */ (0, import_jsx_runtime.jsx)("td", {
+												className: "px-4 py-3",
+												children: c.phone || "-"
+											}),
+											/* @__PURE__ */ (0, import_jsx_runtime.jsx)("td", {
+												className: "px-4 py-3 font-semibold",
+												children: s.contacts
+											}),
+											/* @__PURE__ */ (0, import_jsx_runtime.jsx)("td", {
+												className: "px-4 py-3",
+												children: s.calls
+											}),
+											/* @__PURE__ */ (0, import_jsx_runtime.jsx)("td", {
+												className: "px-4 py-3",
+												children: s.messages
+											}),
+											/* @__PURE__ */ (0, import_jsx_runtime.jsx)("td", {
+												className: "px-4 py-3",
+												children: /* @__PURE__ */ (0, import_jsx_runtime.jsx)(RowActions, {
+													onEdit: () => openModal("client", c.id),
+													onDelete: () => askDelete("Delete Client?", "Delete this client?", () => deleteClient({ data: { id: c.id } }).then(() => void 0))
+												})
+											})
+										]
+									}, c.id);
+								}) })]
+							})
+						}), /* @__PURE__ */ (0, import_jsx_runtime.jsx)("div", {
+							className: "space-y-3 p-4 md:hidden",
+							children: filteredClients.map((c) => {
+								const s = getClientStats(data, c.id);
+								return /* @__PURE__ */ (0, import_jsx_runtime.jsx)(MobileCard, {
+									title: c.name,
+									subtitle: `${c.industry || "Company"} · ${c.status}`,
+									rows: [
+										["Notes", c.notes?.trim() || "-"],
+										["Phone", c.phone || "-"],
+										["Contacts", String(s.contacts)],
+										["Calls", String(s.calls)],
+										["Messages", String(s.messages)]
+									],
+									onEdit: () => openModal("client", c.id),
+									onDelete: () => askDelete("Delete Client?", "Delete this client?", () => deleteClient({ data: { id: c.id } }).then(() => void 0))
 								}, c.id);
 							})
 						})] }) })
@@ -1301,7 +1837,7 @@ function ZynloApp({ initial }) {
 						}),
 						analyticsTab === "performance" && /* @__PURE__ */ (0, import_jsx_runtime.jsxs)("div", {
 							className: "grid grid-cols-1 gap-6 lg:grid-cols-2",
-							children: [/* @__PURE__ */ (0, import_jsx_runtime.jsxs)(Card, { children: [/* @__PURE__ */ (0, import_jsx_runtime.jsx)(CardHeader, { title: "Daily Call Volume (Last 7 Days)" }), /* @__PURE__ */ (0, import_jsx_runtime.jsx)("div", {
+							children: [/* @__PURE__ */ (0, import_jsx_runtime.jsxs)(Card, { children: [/* @__PURE__ */ (0, import_jsx_runtime.jsx)(CardHeader, { title: "Daily Volume (Last 7 Days)" }), /* @__PURE__ */ (0, import_jsx_runtime.jsx)("div", {
 								className: "h-[280px] p-4",
 								children: /* @__PURE__ */ (0, import_jsx_runtime.jsx)(ResponsiveContainer, {
 									width: "100%",
@@ -1325,9 +1861,19 @@ function ZynloApp({ initial }) {
 											/* @__PURE__ */ (0, import_jsx_runtime.jsx)(Line, {
 												type: "monotone",
 												dataKey: "calls",
+												name: "Calls",
 												stroke: "#a743ff",
 												strokeWidth: 2,
 												dot: { fill: "#a743ff" }
+											}),
+											/* @__PURE__ */ (0, import_jsx_runtime.jsx)(Line, {
+												type: "monotone",
+												dataKey: "messages",
+												name: "Messages",
+												stroke: "#8a2be2",
+												strokeWidth: 2,
+												strokeDasharray: "4 4",
+												dot: { fill: "#8a2be2" }
 											})
 										]
 									})
@@ -1401,6 +1947,10 @@ function ZynloApp({ initial }) {
 										}),
 										/* @__PURE__ */ (0, import_jsx_runtime.jsx)("th", {
 											className: "px-4 py-3",
+											children: "Msgs"
+										}),
+										/* @__PURE__ */ (0, import_jsx_runtime.jsx)("th", {
+											className: "px-4 py-3",
 											children: "Resolution"
 										}),
 										/* @__PURE__ */ (0, import_jsx_runtime.jsx)("th", {
@@ -1434,6 +1984,10 @@ function ZynloApp({ initial }) {
 											className: "px-4 py-3",
 											children: r.total
 										}),
+										/* @__PURE__ */ (0, import_jsx_runtime.jsx)("td", {
+											className: "px-4 py-3",
+											children: r.messages
+										}),
 										/* @__PURE__ */ (0, import_jsx_runtime.jsxs)("td", {
 											className: "px-4 py-3",
 											children: [Math.round(r.resolutionRate * 100), "%"]
@@ -1444,7 +1998,7 @@ function ZynloApp({ initial }) {
 										}),
 										/* @__PURE__ */ (0, import_jsx_runtime.jsx)("td", {
 											className: "px-4 py-3",
-											children: r.csat ? r.csat.toFixed(1) : "—"
+											children: r.csat ? r.csat.toFixed(1) : "-"
 										}),
 										/* @__PURE__ */ (0, import_jsx_runtime.jsx)("td", {
 											className: "px-4 py-3 font-bold",
@@ -1454,149 +2008,6 @@ function ZynloApp({ initial }) {
 								}, r.agent.id)) })]
 							})
 						})] })
-					] }),
-					section === "clients" && /* @__PURE__ */ (0, import_jsx_runtime.jsxs)(SectionView, { children: [
-						/* @__PURE__ */ (0, import_jsx_runtime.jsx)(Header, {
-							title: "Clients",
-							onExport: () => openModal("export"),
-							primaryLabel: "Add Client",
-							onPrimary: () => openModal("client")
-						}),
-						/* @__PURE__ */ (0, import_jsx_runtime.jsxs)(Toolbar, { children: [/* @__PURE__ */ (0, import_jsx_runtime.jsx)(SearchBox, {
-							value: clientSearch,
-							onChange: setClientSearch,
-							placeholder: "Search clients..."
-						}), /* @__PURE__ */ (0, import_jsx_runtime.jsxs)("select", {
-							className: "w-full rounded-[10px] border border-border bg-white px-3.5 py-2.5 text-sm text-fg outline-none transition focus:border-primary focus:shadow-[0_0_0_3px_rgba(167,67,255,0.12)] w-auto min-w-[160px]",
-							value: clientSort,
-							onChange: (e) => setClientSort(e.target.value),
-							children: [
-								/* @__PURE__ */ (0, import_jsx_runtime.jsx)("option", {
-									value: "calls-desc",
-									children: "Most Calls"
-								}),
-								/* @__PURE__ */ (0, import_jsx_runtime.jsx)("option", {
-									value: "calls-asc",
-									children: "Least Calls"
-								}),
-								/* @__PURE__ */ (0, import_jsx_runtime.jsx)("option", {
-									value: "name-asc",
-									children: "Name A-Z"
-								}),
-								/* @__PURE__ */ (0, import_jsx_runtime.jsx)("option", {
-									value: "name-desc",
-									children: "Name Z-A"
-								}),
-								/* @__PURE__ */ (0, import_jsx_runtime.jsx)("option", {
-									value: "last-contact",
-									children: "Last Contact"
-								})
-							]
-						})] }),
-						clientCards.length === 0 ? /* @__PURE__ */ (0, import_jsx_runtime.jsx)(Card, { children: /* @__PURE__ */ (0, import_jsx_runtime.jsx)(EmptyState, {
-							icon: /* @__PURE__ */ (0, import_jsx_runtime.jsx)(Building2, { className: "h-12 w-12" }),
-							title: "No clients yet",
-							description: "Add clients to group contacts and track accounts."
-						}) }) : /* @__PURE__ */ (0, import_jsx_runtime.jsx)("div", {
-							className: "space-y-3",
-							children: clientCards.map((card) => {
-								const open = openClientCards[card.name];
-								const resolved = card.calls.filter((c) => c.outcome === "Resolved").length;
-								const avg = card.calls.length ? card.calls.reduce((s, c) => s + c.duration, 0) / card.calls.length : 0;
-								return /* @__PURE__ */ (0, import_jsx_runtime.jsxs)("div", {
-									className: "overflow-hidden rounded-2xl border border-border bg-surface shadow-[0_2px_8px_rgba(167,67,255,0.06)]",
-									children: [/* @__PURE__ */ (0, import_jsx_runtime.jsxs)("button", {
-										type: "button",
-										className: "flex w-full items-center justify-between gap-3 bg-purple-50 px-5 py-4 text-left hover:bg-purple-100",
-										onClick: () => setOpenClientCards((m) => ({
-											...m,
-											[card.name]: !m[card.name]
-										})),
-										children: [/* @__PURE__ */ (0, import_jsx_runtime.jsxs)("div", { children: [/* @__PURE__ */ (0, import_jsx_runtime.jsxs)("div", {
-											className: "flex flex-wrap items-center gap-2 text-lg font-bold",
-											children: [card.name, card.client && /* @__PURE__ */ (0, import_jsx_runtime.jsx)(Badge, {
-												tone: card.client.status === "Active" ? "strong" : "soft",
-												children: card.client.status
-											})]
-										}), /* @__PURE__ */ (0, import_jsx_runtime.jsxs)("div", {
-											className: "mt-1 text-xs text-muted",
-											children: [
-												card.contacts.length,
-												" contacts ·",
-												" ",
-												card.calls.length,
-												" calls",
-												card.client?.industry ? ` · ${card.client.industry}` : ""
-											]
-										})] }), /* @__PURE__ */ (0, import_jsx_runtime.jsxs)("div", {
-											className: "flex items-center gap-2",
-											children: [card.client && /* @__PURE__ */ (0, import_jsx_runtime.jsx)(Btn, {
-												size: "sm",
-												variant: "secondary",
-												onClick: (e) => {
-													e.stopPropagation();
-													openModal("client", card.client.id);
-												},
-												children: "Edit"
-											}), /* @__PURE__ */ (0, import_jsx_runtime.jsx)("span", {
-												className: cn("text-primary transition-transform", open && "rotate-180"),
-												children: "▾"
-											})]
-										})]
-									}), open && /* @__PURE__ */ (0, import_jsx_runtime.jsxs)("div", {
-										className: "space-y-4 px-5 py-5",
-										children: [
-											/* @__PURE__ */ (0, import_jsx_runtime.jsxs)("div", {
-												className: "grid grid-cols-2 gap-3 sm:grid-cols-4",
-												children: [
-													/* @__PURE__ */ (0, import_jsx_runtime.jsx)(MiniKpi, {
-														label: "Calls",
-														value: String(card.calls.length)
-													}),
-													/* @__PURE__ */ (0, import_jsx_runtime.jsx)(MiniKpi, {
-														label: "Resolved",
-														value: String(resolved)
-													}),
-													/* @__PURE__ */ (0, import_jsx_runtime.jsx)(MiniKpi, {
-														label: "Avg Duration",
-														value: formatDuration(avg)
-													}),
-													/* @__PURE__ */ (0, import_jsx_runtime.jsx)(MiniKpi, {
-														label: "Contacts",
-														value: String(card.contacts.length)
-													})
-												]
-											}),
-											card.contacts.length > 0 && /* @__PURE__ */ (0, import_jsx_runtime.jsxs)("div", { children: [/* @__PURE__ */ (0, import_jsx_runtime.jsx)("h4", {
-												className: "mb-2 text-xs font-semibold uppercase tracking-wide text-muted",
-												children: "Contacts"
-											}), /* @__PURE__ */ (0, import_jsx_runtime.jsx)("div", {
-												className: "space-y-2",
-												children: card.contacts.map((c) => /* @__PURE__ */ (0, import_jsx_runtime.jsxs)("div", {
-													className: "flex flex-wrap items-center justify-between gap-2 rounded-xl bg-bg px-3 py-2 text-sm",
-													children: [/* @__PURE__ */ (0, import_jsx_runtime.jsx)("span", {
-														className: "font-medium",
-														children: c.name
-													}), /* @__PURE__ */ (0, import_jsx_runtime.jsx)("span", {
-														className: "text-muted",
-														children: c.phone
-													})]
-												}, c.id))
-											})] }),
-											card.client && /* @__PURE__ */ (0, import_jsx_runtime.jsx)("div", {
-												className: "flex justify-end",
-												children: /* @__PURE__ */ (0, import_jsx_runtime.jsx)(Btn, {
-													variant: "danger",
-													size: "sm",
-													onClick: () => askDelete("Delete Client?", "This client record will be removed.", () => deleteClient({ data: { id: card.client.id } }).then(() => void 0)),
-													children: "Delete Client"
-												})
-											})
-										]
-									})]
-								}, card.name);
-							})
-						})
 					] })
 				]
 			}),
@@ -1622,7 +2033,7 @@ function ZynloApp({ initial }) {
 					children: [
 						(!data.agents.length || !data.customers.length) && /* @__PURE__ */ (0, import_jsx_runtime.jsx)("div", {
 							className: "rounded-[10px] border border-purple-200 bg-purple-50 px-4 py-3 text-sm text-purple-800",
-							children: "Add at least one agent and one customer before logging a call."
+							children: "Add an agent and customer first."
 						}),
 						/* @__PURE__ */ (0, import_jsx_runtime.jsxs)("div", {
 							className: "grid grid-cols-1 gap-4 sm:grid-cols-2",
@@ -1665,10 +2076,15 @@ function ZynloApp({ initial }) {
 										required: true,
 										className: inputClass,
 										value: callForm.customerId,
-										onChange: (e) => setCallForm((f) => ({
-											...f,
-											customerId: e.target.value
-										})),
+										onChange: (e) => {
+											const cid = e.target.value;
+											const cu = customersById[cid];
+											setCallForm((f) => ({
+												...f,
+												customerId: cid,
+												clientId: cu?.clientId || f.clientId
+											}));
+										},
 										children: [/* @__PURE__ */ (0, import_jsx_runtime.jsx)("option", {
 											value: "",
 											children: "Select customer"
@@ -1737,7 +2153,7 @@ function ZynloApp({ initial }) {
 									})
 								}),
 								/* @__PURE__ */ (0, import_jsx_runtime.jsx)(Field, {
-									label: "QA Rating (1–5)",
+									label: "QA Rating (1-5)",
 									children: /* @__PURE__ */ (0, import_jsx_runtime.jsx)("input", {
 										type: "number",
 										min: 1,
@@ -1762,7 +2178,186 @@ function ZynloApp({ initial }) {
 									...f,
 									notes: e.target.value
 								})),
-								placeholder: "Call summary, action items…"
+								placeholder: "Notes"
+							})
+						})
+					]
+				})
+			}),
+			/* @__PURE__ */ (0, import_jsx_runtime.jsx)(Modal, {
+				open: modal === "message",
+				onClose: () => setModal(null),
+				title: editId ? "Edit Message" : "Log Message",
+				wide: true,
+				footer: /* @__PURE__ */ (0, import_jsx_runtime.jsxs)(import_jsx_runtime.Fragment, { children: [/* @__PURE__ */ (0, import_jsx_runtime.jsx)(Btn, {
+					variant: "secondary",
+					onClick: () => setModal(null),
+					children: "Cancel"
+				}), /* @__PURE__ */ (0, import_jsx_runtime.jsx)(Btn, {
+					type: "submit",
+					form: "message-form",
+					disabled: busy,
+					children: busy ? "Saving…" : "Save Message"
+				})] }),
+				children: /* @__PURE__ */ (0, import_jsx_runtime.jsxs)("form", {
+					id: "message-form",
+					onSubmit: onSaveMessage,
+					className: "space-y-4",
+					children: [
+						(!data.agents.length || !data.customers.length) && /* @__PURE__ */ (0, import_jsx_runtime.jsx)("div", {
+							className: "rounded-[10px] border border-purple-200 bg-purple-50 px-4 py-3 text-sm text-purple-800",
+							children: "Add an agent and customer first."
+						}),
+						/* @__PURE__ */ (0, import_jsx_runtime.jsxs)("div", {
+							className: "grid grid-cols-1 gap-4 sm:grid-cols-2",
+							children: [
+								/* @__PURE__ */ (0, import_jsx_runtime.jsx)(Field, {
+									label: "Date & Time *",
+									children: /* @__PURE__ */ (0, import_jsx_runtime.jsx)("input", {
+										type: "datetime-local",
+										required: true,
+										className: inputClass,
+										value: msgForm.datetime,
+										onChange: (e) => setMsgForm((f) => ({
+											...f,
+											datetime: e.target.value
+										}))
+									})
+								}),
+								/* @__PURE__ */ (0, import_jsx_runtime.jsx)(Field, {
+									label: "Agent *",
+									children: /* @__PURE__ */ (0, import_jsx_runtime.jsxs)("select", {
+										required: true,
+										className: inputClass,
+										value: msgForm.agentId,
+										onChange: (e) => setMsgForm((f) => ({
+											...f,
+											agentId: e.target.value
+										})),
+										children: [/* @__PURE__ */ (0, import_jsx_runtime.jsx)("option", {
+											value: "",
+											children: "Select agent"
+										}), data.agents.map((a) => /* @__PURE__ */ (0, import_jsx_runtime.jsx)("option", {
+											value: a.id,
+											children: a.name
+										}, a.id))]
+									})
+								}),
+								/* @__PURE__ */ (0, import_jsx_runtime.jsx)(Field, {
+									label: "Customer *",
+									children: /* @__PURE__ */ (0, import_jsx_runtime.jsxs)("select", {
+										required: true,
+										className: inputClass,
+										value: msgForm.customerId,
+										onChange: (e) => {
+											const cid = e.target.value;
+											const cu = customersById[cid];
+											setMsgForm((f) => ({
+												...f,
+												customerId: cid,
+												clientId: cu?.clientId || f.clientId
+											}));
+										},
+										children: [/* @__PURE__ */ (0, import_jsx_runtime.jsx)("option", {
+											value: "",
+											children: "Select customer"
+										}), data.customers.map((c) => /* @__PURE__ */ (0, import_jsx_runtime.jsx)("option", {
+											value: c.id,
+											children: c.name
+										}, c.id))]
+									})
+								}),
+								/* @__PURE__ */ (0, import_jsx_runtime.jsx)(Field, {
+									label: "Client",
+									children: /* @__PURE__ */ (0, import_jsx_runtime.jsxs)("select", {
+										className: inputClass,
+										value: msgForm.clientId,
+										onChange: (e) => setMsgForm((f) => ({
+											...f,
+											clientId: e.target.value
+										})),
+										children: [/* @__PURE__ */ (0, import_jsx_runtime.jsx)("option", {
+											value: "",
+											children: "None"
+										}), data.clients.map((c) => /* @__PURE__ */ (0, import_jsx_runtime.jsx)("option", {
+											value: c.id,
+											children: c.name
+										}, c.id))]
+									})
+								}),
+								/* @__PURE__ */ (0, import_jsx_runtime.jsx)(Field, {
+									label: "Channel",
+									children: /* @__PURE__ */ (0, import_jsx_runtime.jsx)("select", {
+										className: inputClass,
+										value: msgForm.channel,
+										onChange: (e) => setMsgForm((f) => ({
+											...f,
+											channel: e.target.value
+										})),
+										children: MESSAGE_CHANNELS.map((c) => /* @__PURE__ */ (0, import_jsx_runtime.jsx)("option", { children: c }, c))
+									})
+								}),
+								/* @__PURE__ */ (0, import_jsx_runtime.jsx)(Field, {
+									label: "Direction",
+									children: /* @__PURE__ */ (0, import_jsx_runtime.jsx)("select", {
+										className: inputClass,
+										value: msgForm.direction,
+										onChange: (e) => setMsgForm((f) => ({
+											...f,
+											direction: e.target.value
+										})),
+										children: MESSAGE_DIRECTIONS.map((d) => /* @__PURE__ */ (0, import_jsx_runtime.jsx)("option", { children: d }, d))
+									})
+								}),
+								/* @__PURE__ */ (0, import_jsx_runtime.jsx)(Field, {
+									label: "Status",
+									children: /* @__PURE__ */ (0, import_jsx_runtime.jsx)("select", {
+										className: inputClass,
+										value: msgForm.status,
+										onChange: (e) => setMsgForm((f) => ({
+											...f,
+											status: e.target.value
+										})),
+										children: MESSAGE_STATUSES.map((s) => /* @__PURE__ */ (0, import_jsx_runtime.jsx)("option", { children: s }, s))
+									})
+								}),
+								/* @__PURE__ */ (0, import_jsx_runtime.jsx)(Field, {
+									label: "Subject",
+									children: /* @__PURE__ */ (0, import_jsx_runtime.jsx)("input", {
+										className: inputClass,
+										value: msgForm.subject,
+										onChange: (e) => setMsgForm((f) => ({
+											...f,
+											subject: e.target.value
+										})),
+										placeholder: ""
+									})
+								})
+							]
+						}),
+						/* @__PURE__ */ (0, import_jsx_runtime.jsx)(Field, {
+							label: "Message body *",
+							children: /* @__PURE__ */ (0, import_jsx_runtime.jsx)("textarea", {
+								required: true,
+								className: inputClass + " min-h-[100px] resize-y",
+								value: msgForm.body,
+								onChange: (e) => setMsgForm((f) => ({
+									...f,
+									body: e.target.value
+								})),
+								placeholder: "Message"
+							})
+						}),
+						/* @__PURE__ */ (0, import_jsx_runtime.jsx)(Field, {
+							label: "Notes",
+							children: /* @__PURE__ */ (0, import_jsx_runtime.jsx)("textarea", {
+								className: inputClass + " min-h-[60px] resize-y",
+								value: msgForm.notes,
+								onChange: (e) => setMsgForm((f) => ({
+									...f,
+									notes: e.target.value
+								})),
+								placeholder: "Notes"
 							})
 						})
 					]
@@ -1895,6 +2490,24 @@ function ZynloApp({ initial }) {
 							})
 						}),
 						/* @__PURE__ */ (0, import_jsx_runtime.jsx)(Field, {
+							label: "Client",
+							children: /* @__PURE__ */ (0, import_jsx_runtime.jsxs)("select", {
+								className: inputClass,
+								value: customerForm.clientId,
+								onChange: (e) => setCustomerForm((f) => ({
+									...f,
+									clientId: e.target.value
+								})),
+								children: [/* @__PURE__ */ (0, import_jsx_runtime.jsx)("option", {
+									value: "",
+									children: "None"
+								}), data.clients.map((c) => /* @__PURE__ */ (0, import_jsx_runtime.jsx)("option", {
+									value: c.id,
+									children: c.name
+								}, c.id))]
+							})
+						}),
+						/* @__PURE__ */ (0, import_jsx_runtime.jsx)(Field, {
 							label: "Company",
 							children: /* @__PURE__ */ (0, import_jsx_runtime.jsx)("input", {
 								className: inputClass,
@@ -1902,19 +2515,8 @@ function ZynloApp({ initial }) {
 								onChange: (e) => setCustomerForm((f) => ({
 									...f,
 									company: e.target.value
-								}))
-							})
-						}),
-						/* @__PURE__ */ (0, import_jsx_runtime.jsx)(Field, {
-							label: "Notes",
-							className: "sm:col-span-2",
-							children: /* @__PURE__ */ (0, import_jsx_runtime.jsx)("textarea", {
-								className: inputClass + " min-h-[70px]",
-								value: customerForm.notes,
-								onChange: (e) => setCustomerForm((f) => ({
-									...f,
-									notes: e.target.value
-								}))
+								})),
+								placeholder: ""
 							})
 						})
 					]
@@ -2035,7 +2637,8 @@ function ZynloApp({ initial }) {
 								onChange: (e) => setClientForm((f) => ({
 									...f,
 									notes: e.target.value
-								}))
+								})),
+								placeholder: "Notes"
 							})
 						})
 					]
@@ -2045,41 +2648,43 @@ function ZynloApp({ initial }) {
 				open: modal === "export",
 				onClose: () => setModal(null),
 				title: "Export Data",
-				children: !exportClientStep ? /* @__PURE__ */ (0, import_jsx_runtime.jsx)("div", {
+				children: /* @__PURE__ */ (0, import_jsx_runtime.jsx)("div", {
 					className: "grid gap-3",
 					children: [
 						[
 							"calls",
 							"Calls (CSV)",
-							"All call records"
+							"Call log export"
+						],
+						[
+							"messages",
+							"Messages (CSV)",
+							"Message log export"
 						],
 						[
 							"agents",
 							"Agents (CSV)",
-							"Agents with performance stats"
+							"Agent export"
 						],
 						[
 							"customers",
 							"Customers (CSV)",
-							"Customers with call counts"
+							"Customer export"
 						],
 						[
-							"clients-step",
-							"Clients by Company (CSV)",
-							"Select a client or all"
+							"clients",
+							"Clients (CSV)",
+							"Client export"
 						],
 						[
 							"json",
 							"Full Backup (JSON)",
-							"Everything as JSON"
+							"Complete backup"
 						]
 					].map(([key, title, desc]) => /* @__PURE__ */ (0, import_jsx_runtime.jsxs)("button", {
 						type: "button",
 						className: "flex items-start gap-3 rounded-xl border-2 border-border p-4 text-left transition hover:border-primary hover:bg-bg",
-						onClick: () => {
-							if (key === "clients-step") setExportClientStep(true);
-							else exportCsv(key);
-						},
+						onClick: () => exportCsv(key),
 						children: [/* @__PURE__ */ (0, import_jsx_runtime.jsx)(Download, { className: "mt-0.5 h-5 w-5 text-primary" }), /* @__PURE__ */ (0, import_jsx_runtime.jsxs)("div", { children: [/* @__PURE__ */ (0, import_jsx_runtime.jsx)("div", {
 							className: "text-sm font-bold",
 							children: title
@@ -2088,38 +2693,6 @@ function ZynloApp({ initial }) {
 							children: desc
 						})] })]
 					}, key))
-				}) : /* @__PURE__ */ (0, import_jsx_runtime.jsxs)("div", {
-					className: "space-y-4",
-					children: [/* @__PURE__ */ (0, import_jsx_runtime.jsx)(Field, {
-						label: "Client",
-						children: /* @__PURE__ */ (0, import_jsx_runtime.jsxs)("select", {
-							className: inputClass,
-							value: exportClientName,
-							onChange: (e) => setExportClientName(e.target.value),
-							children: [/* @__PURE__ */ (0, import_jsx_runtime.jsx)("option", {
-								value: "",
-								children: "All Clients"
-							}), clientCards.map((c) => /* @__PURE__ */ (0, import_jsx_runtime.jsxs)("option", {
-								value: c.name,
-								children: [
-									c.name,
-									" (",
-									c.calls.length,
-									" calls)"
-								]
-							}, c.name))]
-						})
-					}), /* @__PURE__ */ (0, import_jsx_runtime.jsxs)("div", {
-						className: "flex gap-2",
-						children: [/* @__PURE__ */ (0, import_jsx_runtime.jsx)(Btn, {
-							variant: "secondary",
-							onClick: () => setExportClientStep(false),
-							children: "Back"
-						}), /* @__PURE__ */ (0, import_jsx_runtime.jsx)(Btn, {
-							onClick: () => exportCsv("clients"),
-							children: "Export CSV"
-						})]
-					})]
 				})
 			}),
 			/* @__PURE__ */ (0, import_jsx_runtime.jsx)(Modal, {
@@ -2265,12 +2838,12 @@ function MobileCard({ title, subtitle, rows, onEdit, onDelete }) {
 			/* @__PURE__ */ (0, import_jsx_runtime.jsx)("div", {
 				className: "space-y-2",
 				children: rows.map(([l, v]) => /* @__PURE__ */ (0, import_jsx_runtime.jsxs)("div", {
-					className: "flex justify-between text-sm",
+					className: "flex justify-between gap-3 text-sm",
 					children: [/* @__PURE__ */ (0, import_jsx_runtime.jsx)("span", {
-						className: "text-xs font-semibold uppercase tracking-wide text-muted",
+						className: "shrink-0 text-xs font-semibold uppercase tracking-wide text-muted",
 						children: l
 					}), /* @__PURE__ */ (0, import_jsx_runtime.jsx)("span", {
-						className: "font-medium",
+						className: "text-right font-medium",
 						children: v
 					})]
 				}, l))
@@ -2290,18 +2863,6 @@ function MobileCard({ title, subtitle, rows, onEdit, onDelete }) {
 				})]
 			})
 		]
-	});
-}
-function MiniKpi({ label, value }) {
-	return /* @__PURE__ */ (0, import_jsx_runtime.jsxs)("div", {
-		className: "rounded-xl bg-bg p-3 text-center",
-		children: [/* @__PURE__ */ (0, import_jsx_runtime.jsx)("div", {
-			className: "text-[10px] font-semibold uppercase tracking-wide text-muted",
-			children: label
-		}), /* @__PURE__ */ (0, import_jsx_runtime.jsx)("div", {
-			className: "mt-1 text-xl font-bold",
-			children: value
-		})]
 	});
 }
 function CallsTable({ calls, agents, customers, onEdit, onDelete, compact }) {
@@ -2344,7 +2905,7 @@ function CallsTable({ calls, agents, customers, onEdit, onDelete, compact }) {
 						className: "px-4 py-3",
 						children: "QA"
 					}),
-					!compact && /* @__PURE__ */ (0, import_jsx_runtime.jsx)("th", {
+					/* @__PURE__ */ (0, import_jsx_runtime.jsx)("th", {
 						className: "px-4 py-3",
 						children: "Notes"
 					}),
@@ -2393,9 +2954,10 @@ function CallsTable({ calls, agents, customers, onEdit, onDelete, compact }) {
 							className: "px-4 py-3",
 							children: /* @__PURE__ */ (0, import_jsx_runtime.jsx)(Stars, { rating: c.rating })
 						}),
-						!compact && /* @__PURE__ */ (0, import_jsx_runtime.jsx)("td", {
+						/* @__PURE__ */ (0, import_jsx_runtime.jsx)("td", {
 							className: "max-w-[180px] truncate px-4 py-3 text-xs text-muted",
-							children: c.notes || "—"
+							title: c.notes || void 0,
+							children: shortNotes(c.notes)
 						}),
 						/* @__PURE__ */ (0, import_jsx_runtime.jsx)("td", {
 							className: "px-4 py-3",
@@ -2420,7 +2982,8 @@ function CallsTable({ calls, agents, customers, onEdit, onDelete, compact }) {
 					["Agent", a?.name || "Unknown"],
 					["Duration", formatDuration(c.duration)],
 					["Outcome", c.outcome],
-					["QA", c.rating ? `${c.rating}/5` : "—"]
+					["QA", c.rating ? `${c.rating}/5` : "-"],
+					["Notes", shortNotes(c.notes, 80)]
 				],
 				onEdit: () => onEdit(c.id),
 				onDelete: () => onDelete(c.id)

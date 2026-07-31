@@ -163,20 +163,111 @@ export function getCustomerStats(data: ZynloData, customerId: string) {
 }
 
 export function getClientStats(data: ZynloData, clientId: string) {
-  const contacts = data.customers.filter((c) => c.clientId === clientId);
-  const calls = data.calls.filter((c) => c.clientId === clientId);
-  const messages = (data.messages || []).filter((m) => m.clientId === clientId);
+  const client = data.clients.find((c) => c.id === clientId);
+  const clientNameKey = (client?.name || "")
+    .toLowerCase()
+    .replace(/[^a-z0-9]/g, "");
+  const contacts = data.customers.filter((c) => {
+    if (c.clientId === clientId) return true;
+    // legacy: free-text company matches client name
+    if (
+      clientNameKey &&
+      (c.company || "").toLowerCase().replace(/[^a-z0-9]/g, "") ===
+        clientNameKey
+    ) {
+      return true;
+    }
+    return false;
+  });
+  const contactIds = new Set(contacts.map((c) => c.id));
+
+  // Calls/messages linked by clientId OR by a customer who belongs to this client
+  const calls = data.calls
+    .filter(
+      (c) => c.clientId === clientId || contactIds.has(c.customerId),
+    )
+    .slice()
+    .sort(
+      (a, b) =>
+        new Date(b.datetime).getTime() - new Date(a.datetime).getTime(),
+    );
+  const messages = (data.messages || [])
+    .filter(
+      (m) => m.clientId === clientId || contactIds.has(m.customerId),
+    )
+    .slice()
+    .sort(
+      (a, b) =>
+        new Date(b.datetime).getTime() - new Date(a.datetime).getTime(),
+    );
+
+  const resolved = calls.filter((c) => c.outcome === "Resolved").length;
+  const escalated = calls.filter((c) => c.outcome === "Escalated").length;
+  const followUp = calls.filter((c) => c.outcome === "Follow-up").length;
+  const rated = calls.filter((c) => c.rating != null);
+  const avgDuration = calls.length
+    ? calls.reduce((s, c) => s + (c.duration || 0), 0) / calls.length
+    : 0;
+  const avgQa = rated.length
+    ? rated.reduce((s, c) => s + (c.rating || 0), 0) / rated.length
+    : 0;
+
+  const noteItems: Array<{ t: string; n: string }> = [];
+  if (client?.notes?.trim()) {
+    noteItems.push({ t: "9999", n: client.notes.trim() });
+  }
+  for (const c of calls) {
+    if (c.notes?.trim()) noteItems.push({ t: c.datetime, n: c.notes.trim() });
+  }
+  for (const m of messages) {
+    if (m.notes?.trim()) noteItems.push({ t: m.datetime, n: m.notes.trim() });
+  }
+  noteItems.sort(
+    (a, b) => new Date(b.t).getTime() - new Date(a.t).getTime(),
+  );
+
+  let lastActivity: string | undefined;
+  if (calls[0]?.datetime) lastActivity = calls[0].datetime;
+  if (
+    messages[0]?.datetime &&
+    (!lastActivity || messages[0].datetime > lastActivity)
+  ) {
+    lastActivity = messages[0].datetime;
+  }
+
   return {
     contacts: contacts.length,
+    contactList: contacts,
     calls: calls.length,
+    callList: calls,
     messages: messages.length,
-    lastCall: calls
-      .slice()
-      .sort(
-        (a, b) =>
-          new Date(b.datetime).getTime() - new Date(a.datetime).getTime(),
-      )[0],
+    messageList: messages,
+    resolved,
+    escalated,
+    followUp,
+    avgDuration,
+    avgQa,
+    lastCall: calls[0],
+    lastActivity,
+    accountNotes: client?.notes || "",
+    activityNotes: noteItems
+      .filter((x) => x.t !== "9999")
+      .map((x) => x.n)
+      .join(" | "),
+    allNotes: noteItems.map((x) => x.n).join(" | "),
   };
+}
+
+/** Calls/messages within the last `days` days (for bi-weekly client reports). */
+export function filterSinceDatetime<T extends { datetime: string }>(
+  items: T[],
+  days: number,
+): T[] {
+  const cut = Date.now() - days * 24 * 60 * 60 * 1000;
+  return items.filter((item) => {
+    const t = new Date(item.datetime).getTime();
+    return !Number.isNaN(t) && t >= cut;
+  });
 }
 
 export function downloadText(content: string, filename: string, mime: string) {
