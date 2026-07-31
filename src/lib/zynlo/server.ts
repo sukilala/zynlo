@@ -9,6 +9,10 @@ import type {
   Client,
   ClientStatus,
   Customer,
+  Message,
+  MessageChannel,
+  MessageDirection,
+  MessageStatus,
   ZynloData,
 } from "./types";
 
@@ -31,6 +35,7 @@ type CustomerRow = {
   phone: string;
   email: string;
   company: string;
+  client_id: string | null;
   notes: string;
 };
 type ClientRow = {
@@ -56,6 +61,19 @@ type CallRow = {
   rating: number | null;
   notes: string;
 };
+type MessageRow = {
+  id: string;
+  datetime: string;
+  agent_id: string;
+  customer_id: string;
+  client_id: string | null;
+  channel: string;
+  direction: string;
+  subject: string;
+  body: string;
+  status: string;
+  notes: string;
+};
 
 function mapAgent(r: AgentRow): Agent {
   return {
@@ -73,6 +91,7 @@ function mapCustomer(r: CustomerRow): Customer {
     phone: r.phone || "",
     email: r.email || "",
     company: r.company || "",
+    clientId: r.client_id || null,
     notes: r.notes || "",
   };
 }
@@ -103,21 +122,38 @@ function mapCall(r: CallRow): Call {
     notes: r.notes || "",
   };
 }
+function mapMessage(r: MessageRow): Message {
+  return {
+    id: r.id,
+    datetime: r.datetime,
+    agentId: r.agent_id,
+    customerId: r.customer_id,
+    clientId: r.client_id,
+    channel: (r.channel || "SMS") as MessageChannel,
+    direction: (r.direction || "Inbound") as MessageDirection,
+    subject: r.subject || "",
+    body: r.body || "",
+    status: (r.status || "Open") as MessageStatus,
+    notes: r.notes || "",
+  };
+}
 
 export const getAllData = createServerFn({ method: "GET" }).handler(
   async (): Promise<ZynloData> => {
     const sql = await getSql();
-    const [agents, customers, clients, calls] = await Promise.all([
+    const [agents, customers, clients, calls, messages] = await Promise.all([
       sql<AgentRow>`select id, name, email, role, status from zynlo_agents order by name`,
-      sql<CustomerRow>`select id, name, phone, email, company, notes from zynlo_customers order by name`,
+      sql<CustomerRow>`select id, name, phone, email, company, client_id, notes from zynlo_customers order by name`,
       sql<ClientRow>`select id, name, industry, phone, email, website, status, address, notes from zynlo_clients order by name`,
       sql<CallRow>`select id, datetime, agent_id, customer_id, client_id, type, duration, outcome, rating, notes from zynlo_calls order by datetime desc`,
+      sql<MessageRow>`select id, datetime, agent_id, customer_id, client_id, channel, direction, subject, body, status, notes from zynlo_messages order by datetime desc`,
     ]);
     return {
       agents: agents.map(mapAgent),
       customers: customers.map(mapCustomer),
       clients: clients.map(mapClient),
       calls: calls.map(mapCall),
+      messages: messages.map(mapMessage),
     };
   },
 );
@@ -168,6 +204,7 @@ export const saveCustomer = createServerFn({ method: "POST" })
       phone: string;
       email?: string;
       company?: string;
+      clientId?: string | null;
       notes?: string;
     }) => d,
   )
@@ -179,18 +216,20 @@ export const saveCustomer = createServerFn({ method: "POST" })
     if (!name || !phone) throw new Error("Name and phone are required");
     const email = (data.email || "").trim();
     const company = (data.company || "").trim();
+    const clientId = data.clientId || null;
     const notes = (data.notes || "").trim();
     await sql`
-      insert into zynlo_customers (id, name, phone, email, company, notes)
-      values (${id}, ${name}, ${phone}, ${email}, ${company}, ${notes})
+      insert into zynlo_customers (id, name, phone, email, company, client_id, notes)
+      values (${id}, ${name}, ${phone}, ${email}, ${company}, ${clientId}, ${notes})
       on conflict (id) do update set
         name = excluded.name,
         phone = excluded.phone,
         email = excluded.email,
         company = excluded.company,
+        client_id = excluded.client_id,
         notes = excluded.notes
     `;
-    return { id, name, phone, email, company, notes };
+    return { id, name, phone, email, company, clientId, notes };
   });
 
 export const deleteCustomer = createServerFn({ method: "POST" })
@@ -324,5 +363,73 @@ export const deleteCall = createServerFn({ method: "POST" })
   .handler(async ({ data }) => {
     const sql = await getSql();
     await sql`delete from zynlo_calls where id = ${data.id}`;
+    return { ok: true };
+  });
+
+export const saveMessage = createServerFn({ method: "POST" })
+  .validator(
+    (d: {
+      id?: string;
+      datetime: string;
+      agentId: string;
+      customerId: string;
+      clientId?: string | null;
+      channel?: string;
+      direction?: string;
+      subject?: string;
+      body: string;
+      status?: string;
+      notes?: string;
+    }) => d,
+  )
+  .handler(async ({ data }): Promise<Message> => {
+    const sql = await getSql();
+    const id = data.id || uid();
+    if (!data.datetime || !data.agentId || !data.customerId) {
+      throw new Error("Datetime, agent, and customer are required");
+    }
+    const body = (data.body || "").trim();
+    if (!body) throw new Error("Message body is required");
+    const clientId = data.clientId || null;
+    const channel = data.channel || "SMS";
+    const direction = data.direction || "Inbound";
+    const subject = (data.subject || "").trim();
+    const status = data.status || "Open";
+    const notes = (data.notes || "").trim();
+    await sql`
+      insert into zynlo_messages (id, datetime, agent_id, customer_id, client_id, channel, direction, subject, body, status, notes)
+      values (${id}, ${data.datetime}, ${data.agentId}, ${data.customerId}, ${clientId}, ${channel}, ${direction}, ${subject}, ${body}, ${status}, ${notes})
+      on conflict (id) do update set
+        datetime = excluded.datetime,
+        agent_id = excluded.agent_id,
+        customer_id = excluded.customer_id,
+        client_id = excluded.client_id,
+        channel = excluded.channel,
+        direction = excluded.direction,
+        subject = excluded.subject,
+        body = excluded.body,
+        status = excluded.status,
+        notes = excluded.notes
+    `;
+    return {
+      id,
+      datetime: data.datetime,
+      agentId: data.agentId,
+      customerId: data.customerId,
+      clientId,
+      channel: channel as MessageChannel,
+      direction: direction as MessageDirection,
+      subject,
+      body,
+      status: status as MessageStatus,
+      notes,
+    };
+  });
+
+export const deleteMessage = createServerFn({ method: "POST" })
+  .validator((d: { id: string }) => d)
+  .handler(async ({ data }) => {
+    const sql = await getSql();
+    await sql`delete from zynlo_messages where id = ${data.id}`;
     return { ok: true };
   });

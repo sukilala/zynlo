@@ -1,5 +1,5 @@
 import { n as createServerFn, t as TSS_SERVER_FUNCTION } from "./ssr.mjs";
-//#region node_modules/.nitro/vite/services/ssr/assets/server-BfysrIAj.js
+//#region node_modules/.nitro/vite/services/ssr/assets/server-DeDkoFQO.js
 var createServerRpc = (serverFnMeta, splitImportFn) => {
 	const url = "/_serverFn/" + serverFnMeta.id;
 	return Object.assign(splitImportFn, {
@@ -84,7 +84,7 @@ async function loadPgliteBundles() {
 		const req = createRequire(import.meta.url);
 		candidates.push(dirname(req.resolve("@electric-sql/pglite")));
 	} catch {}
-	candidates.push(join(process.cwd(), "node_modules/@electric-sql/pglite/dist"), join(process.cwd(), "../node_modules/@electric-sql/pglite/dist"), join(process.cwd(), "_libs"), join(process.cwd(), "server/node_modules/@electric-sql/pglite/dist"));
+	candidates.push(join(process.cwd(), "_libs"), join(process.cwd(), "node_modules/@electric-sql/pglite/dist"), join(process.cwd(), "../node_modules/@electric-sql/pglite/dist"), join(process.cwd(), "server/node_modules/@electric-sql/pglite/dist"));
 	let distDir;
 	for (const dir of candidates) if (existsSync(join(dir, "pglite.data")) && existsSync(join(dir, "pglite.wasm"))) {
 		distDir = dir;
@@ -103,7 +103,7 @@ async function loadPgliteBundles() {
 }
 async function createPgliteSql() {
 	globalRef.__pgliteInstance__ ??= (async () => {
-		const { PGlite } = await import("@electric-sql/pglite");
+		const { PGlite } = await import("../_libs/electric-sql__pglite.mjs").then((n) => n.t);
 		const bundles = await loadPgliteBundles();
 		const pg = new PGlite({
 			dataDir: "memory://",

@@ -109,39 +109,39 @@ async function getStartManifest(matchedRoutes) {
 var manifest = {
 	"1aab58855d90df3fb70d76f00b68eb5d12ad4ba43e457e26d64aa3921795a501": {
 		functionName: "deleteAgent_createServerFn_handler",
-		importer: () => import("./server-BfysrIAj.mjs")
+		importer: () => import("./server-DeDkoFQO.mjs")
 	},
 	"1c0926fbb6ea350a61ed7814a761531fbc3df3ec1464cf6574c5fbef7d60e991": {
 		functionName: "saveAgent_createServerFn_handler",
-		importer: () => import("./server-BfysrIAj.mjs")
+		importer: () => import("./server-DeDkoFQO.mjs")
 	},
 	"50e6be06f0b2831bcd80980c9ca4cb9c248b9b459c77b822b27b452026a40c4b": {
 		functionName: "saveCustomer_createServerFn_handler",
-		importer: () => import("./server-BfysrIAj.mjs")
+		importer: () => import("./server-DeDkoFQO.mjs")
 	},
 	"546a5d52727c545a8476cbc19bbd89c2044eaf2a6024fd449aa84b10c3a2f773": {
 		functionName: "saveCall_createServerFn_handler",
-		importer: () => import("./server-BfysrIAj.mjs")
+		importer: () => import("./server-DeDkoFQO.mjs")
 	},
 	"72da098738cac099623266b617a02dab7e4fe5b081d3544dc07996d0dbef5e44": {
 		functionName: "saveClient_createServerFn_handler",
-		importer: () => import("./server-BfysrIAj.mjs")
+		importer: () => import("./server-DeDkoFQO.mjs")
 	},
 	"7a0b35f97bc22a1926b37460e302eefd4d59c949892cf5d551f57fe0e0cc6c99": {
 		functionName: "getAllData_createServerFn_handler",
-		importer: () => import("./server-BfysrIAj.mjs")
+		importer: () => import("./server-DeDkoFQO.mjs")
 	},
 	"8ed78f52680f12f3815a7e3555b4911e9db9b731e0b449666b8cecd3ab2368a0": {
 		functionName: "deleteCustomer_createServerFn_handler",
-		importer: () => import("./server-BfysrIAj.mjs")
+		importer: () => import("./server-DeDkoFQO.mjs")
 	},
 	"deee10331dd88a5ff97e91cc139afb0c93aae2ab7f03e8a0f8b5eb0ed4de6adc": {
 		functionName: "deleteClient_createServerFn_handler",
-		importer: () => import("./server-BfysrIAj.mjs")
+		importer: () => import("./server-DeDkoFQO.mjs")
 	},
 	"ed7ecdc4db7b1e406d8334cbea057c8b365399b81b235c810f5d6ee07f50b6fc": {
 		functionName: "deleteCall_createServerFn_handler",
-		importer: () => import("./server-BfysrIAj.mjs")
+		importer: () => import("./server-DeDkoFQO.mjs")
 	}
 };
 async function getServerFnById(id, access) {

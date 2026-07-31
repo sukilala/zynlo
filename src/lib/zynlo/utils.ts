@@ -1,4 +1,4 @@
-import type { Agent, Call, Customer, ZynloData } from "./types";
+import type { Agent, Call, Client, Customer, Message, ZynloData } from "./types";
 
 export function formatDate(d: string | undefined | null): string {
   if (!d) return "—";
@@ -65,8 +65,27 @@ export function customerMap(data: ZynloData): Record<string, Customer> {
   return m;
 }
 
+export function clientMap(data: ZynloData): Record<string, Client> {
+  const m: Record<string, Client> = {};
+  for (const c of data.clients) m[c.id] = c;
+  return m;
+}
+
+/** Resolve display company for a customer: linked client name > free-text company */
+export function customerCompanyLabel(
+  customer: Customer | undefined,
+  clients: Record<string, Client>,
+): string {
+  if (!customer) return "—";
+  if (customer.clientId && clients[customer.clientId]) {
+    return clients[customer.clientId].name;
+  }
+  return customer.company || "—";
+}
+
 export function getAgentStats(data: ZynloData, agentId: string) {
   const agentCalls = data.calls.filter((c) => c.agentId === agentId);
+  const agentMsgs = (data.messages || []).filter((m) => m.agentId === agentId);
   const total = agentCalls.length;
   const resolved = agentCalls.filter((c) => c.outcome === "Resolved").length;
   const rated = agentCalls.filter((c) => c.rating != null);
@@ -78,6 +97,7 @@ export function getAgentStats(data: ZynloData, agentId: string) {
     : 0;
   return {
     total,
+    messages: agentMsgs.length,
     resolved,
     resolutionRate: total ? resolved / total : 0,
     avgDuration,
@@ -92,9 +112,24 @@ export function getCustomerStats(data: ZynloData, customerId: string) {
       (a, b) =>
         new Date(b.datetime).getTime() - new Date(a.datetime).getTime(),
     );
+  const custMsgs = (data.messages || [])
+    .filter((m) => m.customerId === customerId)
+    .sort(
+      (a, b) =>
+        new Date(b.datetime).getTime() - new Date(a.datetime).getTime(),
+    );
+  const lastCall = custCalls[0] as Call | undefined;
+  const lastMsg = custMsgs[0] as Message | undefined;
+  let lastContact = lastCall?.datetime;
+  if (lastMsg && (!lastContact || lastMsg.datetime > lastContact)) {
+    lastContact = lastMsg.datetime;
+  }
   return {
     total: custCalls.length,
-    lastCall: custCalls[0] as Call | undefined,
+    messages: custMsgs.length,
+    lastCall,
+    lastMessage: lastMsg,
+    lastContact,
     resolved: custCalls.filter((c) => c.outcome === "Resolved").length,
     escalated: custCalls.filter((c) => c.outcome === "Escalated").length,
     avgDuration: custCalls.length
@@ -106,11 +141,27 @@ export function getCustomerStats(data: ZynloData, customerId: string) {
         ? rated.reduce((s, c) => s + (c.rating || 0), 0) / rated.length
         : 0;
     })(),
-    lastContact: custCalls[0]?.datetime,
     callNotes: custCalls
       .filter((c) => c.notes)
       .map((c) => c.notes)
       .join(" | "),
+  };
+}
+
+export function getClientStats(data: ZynloData, clientId: string) {
+  const contacts = data.customers.filter((c) => c.clientId === clientId);
+  const calls = data.calls.filter((c) => c.clientId === clientId);
+  const messages = (data.messages || []).filter((m) => m.clientId === clientId);
+  return {
+    contacts: contacts.length,
+    calls: calls.length,
+    messages: messages.length,
+    lastCall: calls
+      .slice()
+      .sort(
+        (a, b) =>
+          new Date(b.datetime).getTime() - new Date(a.datetime).getTime(),
+      )[0],
   };
 }
 
@@ -133,4 +184,11 @@ export function escapeCsv(val: unknown): string {
 export function localDatetimeValue(d = new Date()): string {
   const pad = (n: number) => String(n).padStart(2, "0");
   return `${d.getFullYear()}-${pad(d.getMonth() + 1)}-${pad(d.getDate())}T${pad(d.getHours())}:${pad(d.getMinutes())}`;
+}
+
+/** Truncate long notes for table cells */
+export function shortNotes(text: string, max = 60): string {
+  const t = (text || "").trim();
+  if (!t) return "—";
+  return t.length > max ? t.slice(0, max - 1) + "…" : t;
 }

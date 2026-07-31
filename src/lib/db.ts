@@ -128,10 +128,10 @@ async function loadPgliteBundles(): Promise<{
     // ignore — fall through to cwd paths
   }
   candidates.push(
+    // Vercel/Nitro function: we copy binaries here at build time
+    join(process.cwd(), "_libs"),
     join(process.cwd(), "node_modules/@electric-sql/pglite/dist"),
     join(process.cwd(), "../node_modules/@electric-sql/pglite/dist"),
-    // Nitro may hoist assets next to the function
-    join(process.cwd(), "_libs"),
     join(process.cwd(), "server/node_modules/@electric-sql/pglite/dist"),
   );
 

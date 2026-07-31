@@ -1,5 +1,8 @@
 import type { Plugin } from "vite";
 import { defineConfig } from "vite";
+import { cpSync, existsSync, mkdirSync } from "node:fs";
+import { dirname, join } from "node:path";
+import { createRequire } from "node:module";
 import { tanstackStart } from "@tanstack/react-start/plugin/vite";
 import viteReact from "@vitejs/plugin-react";
 import tailwindcss from "@tailwindcss/vite";
@@ -111,6 +114,14 @@ function zynloApiPlugin(): Plugin {
             await mod.removeCall(id);
             return send(200, { ok: true });
           }
+          if (pathOnly === "/api/zynlo/messages" && method === "POST") {
+            return send(200, await mod.upsertMessage(body));
+          }
+          if (pathOnly.startsWith("/api/zynlo/messages/") && method === "DELETE") {
+            const id = decodeURIComponent(pathOnly.split("/").pop() || "");
+            await mod.removeMessage(id);
+            return send(200, { ok: true });
+          }
 
           send(404, { error: "Not found" });
         } catch (err) {
@@ -207,6 +218,68 @@ function authPopupPlugin(): Plugin {
   };
 }
 
+
+/**
+ * After the Vercel/Nitro build, copy PGlite binary assets into the serverless
+ * function so production can open them (fixes ENOENT on pglite.data).
+ */
+function copyPgliteAssetsPlugin(): Plugin {
+  return {
+    name: "app-builder:copy-pglite-assets",
+    apply: "build",
+    closeBundle() {
+      // Nitro emits to .vercel/output/functions/__server.func for the vercel preset.
+      const funcRoot = join(process.cwd(), ".vercel/output/functions/__server.func");
+      if (!existsSync(funcRoot)) {
+        console.warn("[pglite-assets] function dir not found yet:", funcRoot);
+        return;
+      }
+      let distDir: string;
+      try {
+        const req = createRequire(import.meta.url);
+        distDir = dirname(req.resolve("@electric-sql/pglite"));
+      } catch {
+        distDir = join(
+          process.cwd(),
+          "node_modules/@electric-sql/pglite/dist",
+        );
+      }
+      if (!existsSync(join(distDir, "pglite.data"))) {
+        console.error("[pglite-assets] source pglite.data missing at", distDir);
+        return;
+      }
+      // 1) Put binaries where Nitro's rewritten import.meta.url would look
+      const libs = join(funcRoot, "_libs");
+      mkdirSync(libs, { recursive: true });
+      for (const name of ["pglite.data", "pglite.wasm", "initdb.wasm"]) {
+        const from = join(distDir, name);
+        if (existsSync(from)) {
+          cpSync(from, join(libs, name));
+          console.log("[pglite-assets] copied", name, "-> _libs/");
+        }
+      }
+      // 2) Also install a minimal package tree so require.resolve works
+      const pkgDist = join(
+        funcRoot,
+        "node_modules/@electric-sql/pglite/dist",
+      );
+      mkdirSync(pkgDist, { recursive: true });
+      // Copy whole dist (js + wasm + data) — needed for dynamic import external
+      cpSync(distDir, pkgDist, { recursive: true });
+      // package.json for resolve
+      const pkgJsonSrc = join(distDir, "..", "package.json");
+      if (existsSync(pkgJsonSrc)) {
+        cpSync(
+          pkgJsonSrc,
+          join(funcRoot, "node_modules/@electric-sql/pglite/package.json"),
+        );
+      }
+      console.log("[pglite-assets] installed @electric-sql/pglite into function");
+    },
+  };
+}
+
+
 export default defineConfig(({ command }) => ({
   server: {
     host: "0.0.0.0",
@@ -220,30 +293,9 @@ export default defineConfig(({ command }) => ({
     authPopupPlugin(),
     tailwindcss(),
     tanstackStart(),
-    ...(command === "build"
-      ? [
-          nitro({
-            preset: "vercel",
-            // Keep @electric-sql/pglite out of the rollup bundle so its
-            // pglite.data / .wasm files remain on disk under node_modules
-            // (required by loadPgliteBundles in src/lib/db.ts).
-            rollupConfig: {
-              external: (id: string) =>
-                id === "@electric-sql/pglite" ||
-                id.startsWith("@electric-sql/pglite/"),
-            },
-            // Ensure binary assets are traced into the Vercel function.
-            externals: {
-              traceInclude: [
-                "node_modules/@electric-sql/pglite/dist/pglite.data",
-                "node_modules/@electric-sql/pglite/dist/pglite.wasm",
-                "node_modules/@electric-sql/pglite/dist/initdb.wasm",
-                "node_modules/@electric-sql/pglite/package.json",
-              ],
-            },
-          }),
-        ]
-      : []),
+    ...(command === "build" ? [nitro({ preset: "vercel" })] : []),
+    // Runs after Nitro emits .vercel/output so PGlite .data/.wasm land in the function
+    ...(command === "build" ? [copyPgliteAssetsPlugin()] : []),
     viteReact(),
   ],
 }));
