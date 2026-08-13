@@ -65,12 +65,14 @@ import {
 } from "@/lib/zynlo/types";
 import {
   agentMap,
+  callRating,
   clientMap,
   customerCompanyLabel,
   customerMap,
   downloadText,
   escapeCsv,
   filterSinceDatetime,
+  findCustomerByPhone,
   formatDate,
   formatDuration,
   getAgentStats,
@@ -107,6 +109,7 @@ type Section =
 
 type ModalKind =
   | null
+  | "quick"
   | "call"
   | "message"
   | "agent"
@@ -169,6 +172,7 @@ export function ZynloApp({ initial }: { initial: ZynloData }) {
   const [callSearch, setCallSearch] = useState("");
   const [callOutcome, setCallOutcome] = useState("");
   const [callAgent, setCallAgent] = useState("");
+  const [callType, setCallType] = useState("");
   const [msgSearch, setMsgSearch] = useState("");
   const [msgChannel, setMsgChannel] = useState("");
   const [msgStatus, setMsgStatus] = useState("");
@@ -180,6 +184,20 @@ export function ZynloApp({ initial }: { initial: ZynloData }) {
   const [exportClientStep, setExportClientStep] = useState(false);
   const [exportClientName, setExportClientName] = useState("");
   const [selectedClientId, setSelectedClientId] = useState<string | null>(null);
+  const [quickForm, setQuickForm] = useState({
+    mode: "call" as "call" | "message",
+    datetime: localDatetimeValue(),
+    agentId: "",
+    phone: "",
+    name: "",
+    clientId: "",
+    type: "Inbound",
+    duration: "3",
+    outcome: "Resolved",
+    rating: "",
+    channel: "SMS",
+    notes: "",
+  });
 
   const [callForm, setCallForm] = useState({
     datetime: localDatetimeValue(),
@@ -267,32 +285,64 @@ export function ZynloApp({ initial }: { initial: ZynloData }) {
     const aht = todayCalls.length
       ? todayCalls.reduce((s, c) => s + (c.duration || 0), 0) / todayCalls.length
       : 0;
-    const rated = todayCalls.filter((c) => c.rating != null);
-    const csat = rated.length
-      ? rated.reduce((s, c) => s + (c.rating || 0), 0) / rated.length
+    const ratedScores = data.calls
+      .map(callRating)
+      .filter((n): n is number => n != null);
+    const csat = ratedScores.length
+      ? ratedScores.reduce((s, n) => s + n, 0) / ratedScores.length
+      : 0;
+    const todayRatedScores = todayCalls
+      .map(callRating)
+      .filter((n): n is number => n != null);
+    const todayCsat = todayRatedScores.length
+      ? todayRatedScores.reduce((s, n) => s + n, 0) / todayRatedScores.length
       : 0;
     const delta = todayCalls.length - yestCalls.length;
+    const inboundToday = todayCalls.filter(
+      (c) => (c.type || "Inbound") === "Inbound",
+    ).length;
+    const outboundToday = todayCalls.filter(
+      (c) => c.type === "Outbound",
+    ).length;
+    const callbackToday = todayCalls.filter(
+      (c) => c.type === "Callback",
+    ).length;
     return {
       totalToday: todayCalls.length,
+      inboundToday,
+      outboundToday,
+      callbackToday,
       msgsToday: todayMsgs.length,
       delta,
       resolution,
       aht,
       csat,
+      ratedCount: ratedScores.length,
+      todayCsat,
+      todayRatedCount: todayRatedScores.length,
     };
   }, [data.calls, messages]);
 
-  const hourData = useMemo(() => {
-    const hours = Array.from({ length: 24 }, (_, i) => ({
-      hour: `${i}:00`,
-      calls: 0,
-    }));
-    for (const c of data.calls) {
-      if (!c.datetime) continue;
-      const h = new Date(c.datetime).getHours();
-      if (!isNaN(h)) hours[h].calls += 1;
+  const callsByDay = useMemo(() => {
+    const days = [];
+    for (let i = 13; i >= 0; i--) {
+      const d = new Date();
+      d.setDate(d.getDate() - i);
+      const str =
+        d.getFullYear() +
+        "-" +
+        String(d.getMonth() + 1).padStart(2, "0") +
+        "-" +
+        String(d.getDate()).padStart(2, "0");
+      days.push({
+        label: d.toLocaleDateString("en-GB", {
+          weekday: "short",
+          day: "numeric",
+        }),
+        calls: data.calls.filter((c) => c.datetime?.startsWith(str)).length,
+      });
     }
-    return hours;
+    return days;
   }, [data.calls]);
 
   const outcomeData = useMemo(() => {
@@ -391,6 +441,7 @@ export function ZynloApp({ initial }: { initial: ZynloData }) {
     }
     if (callOutcome) list = list.filter((c) => c.outcome === callOutcome);
     if (callAgent) list = list.filter((c) => c.agentId === callAgent);
+    if (callType) list = list.filter((c) => (c.type || "Inbound") === callType);
     list.sort(
       (a, b) =>
         new Date(b.datetime).getTime() - new Date(a.datetime).getTime(),
@@ -459,7 +510,24 @@ export function ZynloApp({ initial }: { initial: ZynloData }) {
   function openModal(kind: ModalKind, id?: string) {
     setEditId(id || null);
     setExportClientStep(false);
-    if (kind === "call") {
+    if (kind === "quick") {
+      const defaultAgent = data.agents[0]?.id || "";
+      const prefClient = id || selectedClientId || "";
+      setQuickForm({
+        mode: "call",
+        datetime: localDatetimeValue(),
+        agentId: defaultAgent,
+        phone: "",
+        name: "",
+        clientId: prefClient,
+        type: "Inbound",
+        duration: "3",
+        outcome: "Resolved",
+        rating: "",
+        channel: "SMS",
+        notes: "",
+      });
+    } else if (kind === "call") {
       if (id) {
         const c = data.calls.find((x) => x.id === id);
         if (c) {
@@ -479,8 +547,8 @@ export function ZynloApp({ initial }: { initial: ZynloData }) {
         setCallForm({
           datetime: localDatetimeValue(),
           agentId: data.agents[0]?.id || "",
-          customerId: data.customers[0]?.id || "",
-          clientId: data.customers[0]?.clientId || data.clients[0]?.id || "",
+          customerId: "",
+          clientId: "",
           type: "Inbound",
           duration: "3",
           outcome: "Resolved",
@@ -510,8 +578,8 @@ export function ZynloApp({ initial }: { initial: ZynloData }) {
         setMsgForm({
           datetime: localDatetimeValue(),
           agentId: data.agents[0]?.id || "",
-          customerId: data.customers[0]?.id || "",
-          clientId: data.customers[0]?.clientId || data.clients[0]?.id || "",
+          customerId: "",
+          clientId: "",
           channel: "SMS",
           direction: "Inbound",
           subject: "",
@@ -594,12 +662,8 @@ export function ZynloApp({ initial }: { initial: ZynloData }) {
     }
     setBusy(true);
     try {
-      // Auto-fill client from customer link if not set
-      let clientId = callForm.clientId || null;
-      if (!clientId) {
-        const cu = customersById[callForm.customerId];
-        if (cu?.clientId) clientId = cu.clientId;
-      }
+      // Client dropdown is source of truth (empty = none). Do not re-apply old customer link.
+      const clientId = callForm.clientId || null;
       await saveCall({
         data: {
           id: editId || undefined,
@@ -624,6 +688,107 @@ export function ZynloApp({ initial }: { initial: ZynloData }) {
     }
   }
 
+
+  async function onSaveQuick(e: React.FormEvent) {
+    e.preventDefault();
+    const phone = quickForm.phone.trim();
+    const notes = quickForm.notes.trim();
+    if (!quickForm.agentId) {
+      toast("Select an agent");
+      return;
+    }
+    if (!phone) {
+      toast("Phone is required");
+      return;
+    }
+    if (!notes) {
+      toast("Notes are required");
+      return;
+    }
+    setBusy(true);
+    try {
+      // Exact-ish phone match only (no short partial matches)
+      let customer = findCustomerByPhone(data.customers, phone) || null;
+      const typedName = quickForm.name.trim();
+      // Form Client field is source of truth
+      const clientId = quickForm.clientId || null;
+
+      if (!customer) {
+        const name = typedName || phone;
+        const company =
+          clientId && clientsById[clientId] ? clientsById[clientId].name : "";
+        customer = await saveCustomer({
+          data: {
+            name,
+            phone,
+            email: "",
+            company,
+            clientId,
+            notes: "",
+          },
+        });
+      } else {
+        // Respect the name the agent typed — never keep a stale name on reuse
+        const nextName = typedName || customer.name;
+        const nameChanged = nextName !== customer.name;
+        const clientChanged = clientId !== (customer.clientId || null);
+        if (nameChanged || clientChanged) {
+          customer = await saveCustomer({
+            data: {
+              id: customer.id,
+              name: nextName,
+              phone: customer.phone || phone,
+              email: customer.email,
+              company:
+                (clientId && clientsById[clientId]?.name) ||
+                customer.company,
+              clientId,
+              notes: "",
+            },
+          });
+        }
+      }
+
+      if (quickForm.mode === "call") {
+        await saveCall({
+          data: {
+            datetime: quickForm.datetime,
+            agentId: quickForm.agentId,
+            customerId: customer.id,
+            clientId,
+            type: quickForm.type || "Inbound",
+            duration: parseFloat(quickForm.duration) || 0,
+            outcome: quickForm.outcome,
+            rating: quickForm.rating ? parseInt(quickForm.rating, 10) : null,
+            notes,
+          },
+        });
+      } else {
+        await saveMessage({
+          data: {
+            datetime: quickForm.datetime,
+            agentId: quickForm.agentId,
+            customerId: customer.id,
+            clientId,
+            channel: quickForm.channel,
+            direction: "Inbound",
+            subject: "",
+            body: notes,
+            status: "Closed",
+            notes: "",
+          },
+        });
+      }
+      await refresh();
+      setModal(null);
+      toast(quickForm.mode === "call" ? "Call logged" : "Message logged");
+    } catch (err) {
+      toast(err instanceof Error ? err.message : "Failed to save");
+    } finally {
+      setBusy(false);
+    }
+  }
+
   async function onSaveMessage(e: React.FormEvent) {
     e.preventDefault();
     if (!msgForm.agentId || !msgForm.customerId) {
@@ -636,11 +801,7 @@ export function ZynloApp({ initial }: { initial: ZynloData }) {
     }
     setBusy(true);
     try {
-      let clientId = msgForm.clientId || null;
-      if (!clientId) {
-        const cu = customersById[msgForm.customerId];
-        if (cu?.clientId) clientId = cu.clientId;
-      }
+      const clientId = msgForm.clientId || null;
       await saveMessage({
         data: {
           id: editId || undefined,
@@ -776,13 +937,14 @@ export function ZynloApp({ initial }: { initial: ZynloData }) {
     const date = new Date().toISOString().split("T")[0];
     if (type === "calls") {
       const header =
-        "Datetime,Agent,Customer,Type,Duration,Outcome,Rating,Notes\n";
+        "Datetime,Agent,Customer,Phone,Type,Duration,Outcome,Rating,Notes\n";
       const rows = data.calls
         .map((c) =>
           [
             c.datetime,
             agentsById[c.agentId]?.name || "",
             customersById[c.customerId]?.name || "",
+            customersById[c.customerId]?.phone || "",
             c.type,
             c.duration,
             c.outcome,
@@ -1002,6 +1164,7 @@ export function ZynloApp({ initial }: { initial: ZynloData }) {
             "Datetime",
             "Agent",
             "Customer",
+            "Phone",
             "Type",
             "Duration (min)",
             "Outcome",
@@ -1017,6 +1180,7 @@ export function ZynloApp({ initial }: { initial: ZynloData }) {
               call.datetime,
               agentsById[call.agentId]?.name || "",
               customersById[call.customerId]?.name || "",
+              customersById[call.customerId]?.phone || "",
               call.type,
               call.duration,
               call.outcome,
@@ -1088,13 +1252,21 @@ export function ZynloApp({ initial }: { initial: ZynloData }) {
     setSidebarOpen(false);
   };
 
-  const recent = data.calls
+  const todayKey = todayStr();
+  const todayCallsSorted = data.calls
+    .filter((c) => c.datetime?.startsWith(todayKey))
     .slice()
     .sort(
       (a, b) =>
         new Date(b.datetime).getTime() - new Date(a.datetime).getTime(),
-    )
-    .slice(0, 8);
+    );
+  const todayInbound = todayCallsSorted.filter(
+    (c) => (c.type || "Inbound") === "Inbound",
+  );
+  const todayOutbound = todayCallsSorted.filter((c) => c.type === "Outbound");
+  const todayCallback = todayCallsSorted.filter((c) => c.type === "Callback");
+
+  const recent = todayCallsSorted.slice(0, 8);
 
   const recentMsgs = messages
     .slice()
@@ -1166,8 +1338,8 @@ export function ZynloApp({ initial }: { initial: ZynloData }) {
             <Header
               title="Dashboard"
               onExport={() => openModal("export")}
-              primaryLabel="Log Call"
-              onPrimary={() => openModal("call")}
+              primaryLabel="Quick Log"
+              onPrimary={() => openModal("quick")}
             />
             <div className="grid grid-cols-1 gap-3 sm:grid-cols-2 xl:grid-cols-5">
               <Kpi
@@ -1175,6 +1347,13 @@ export function ZynloApp({ initial }: { initial: ZynloData }) {
                 label="Calls Today"
                 value={String(kpis.totalToday)}
                 sub={`${kpis.delta >= 0 ? "+" : ""}${kpis.delta} vs yesterday`}
+                breakdown={[
+                  { label: "Inbound", value: kpis.inboundToday },
+                  { label: "Outbound", value: kpis.outboundToday },
+                  ...(kpis.callbackToday > 0
+                    ? [{ label: "Callback", value: kpis.callbackToday }]
+                    : []),
+                ]}
               />
               <Kpi
                 icon={<MessageSquare className="h-5 w-5" />}
@@ -1195,25 +1374,33 @@ export function ZynloApp({ initial }: { initial: ZynloData }) {
               <Kpi
                 icon={<Star className="h-5 w-5" />}
                 label="Quality Assurance"
-                value={kpis.csat ? kpis.csat.toFixed(1) : "0.0"}
-                sub="/ 5.0"
+                value={kpis.ratedCount ? kpis.csat.toFixed(1) : "-"}
+                sub={
+                  kpis.ratedCount
+                    ? `${kpis.ratedCount} rated from call log${
+                        kpis.todayRatedCount
+                          ? ` · today ${kpis.todayCsat.toFixed(1)}`
+                          : ""
+                      }`
+                    : "No rated calls yet"
+                }
                 accent
               />
             </div>
             <div className="grid grid-cols-1 gap-6 lg:grid-cols-2">
               <Card>
-                <CardHeader title="Calls by Hour" />
+                <CardHeader title="Calls by Day" />
                 <div className="h-[260px] p-4">
                   <ResponsiveContainer width="100%" height="100%">
-                    <BarChart data={hourData}>
+                    <BarChart data={callsByDay}>
                       <CartesianGrid
                         strokeDasharray="3 3"
                         stroke="rgba(167,67,255,0.08)"
                       />
                       <XAxis
-                        dataKey="hour"
+                        dataKey="label"
                         tick={{ fontSize: 10 }}
-                        interval={3}
+                        interval={0}
                       />
                       <YAxis allowDecimals={false} tick={{ fontSize: 11 }} />
                       <Tooltip />
@@ -1255,7 +1442,7 @@ export function ZynloApp({ initial }: { initial: ZynloData }) {
             <div className="grid grid-cols-1 gap-6 lg:grid-cols-2">
               <Card>
                 <CardHeader
-                  title="Recent Calls"
+                  title="Calls Today"
                   action={
                     <Btn
                       variant="secondary"
@@ -1266,18 +1453,76 @@ export function ZynloApp({ initial }: { initial: ZynloData }) {
                     </Btn>
                   }
                 />
-                <CallsTable
-                  calls={recent}
-                  agents={agentsById}
-                  customers={customersById}
-                  onEdit={(id) => openModal("call", id)}
-                  onDelete={(id) =>
-                    askDelete("Delete Call?", "Delete this call?", () =>
-                      deleteCall({ data: { id } }).then(() => undefined),
-                    )
-                  }
-                  compact
-                />
+                <div className="space-y-4 p-4 pt-0">
+                  <div>
+                    <div className="mb-2 flex items-center justify-between">
+                      <h3 className="text-xs font-semibold uppercase tracking-wide text-muted">
+                        Inbound
+                      </h3>
+                      <span className="text-xs font-bold text-primary">
+                        {todayInbound.length}
+                      </span>
+                    </div>
+                    <CallsTable
+                      calls={todayInbound.slice(0, 6)}
+                      agents={agentsById}
+                      customers={customersById}
+                      onEdit={(id) => openModal("call", id)}
+                      onDelete={(id) =>
+                        askDelete("Delete Call?", "Delete this call?", () =>
+                          deleteCall({ data: { id } }).then(() => undefined),
+                        )
+                      }
+                      compact
+                    />
+                  </div>
+                  <div>
+                    <div className="mb-2 flex items-center justify-between">
+                      <h3 className="text-xs font-semibold uppercase tracking-wide text-muted">
+                        Outbound
+                      </h3>
+                      <span className="text-xs font-bold text-primary">
+                        {todayOutbound.length}
+                      </span>
+                    </div>
+                    <CallsTable
+                      calls={todayOutbound.slice(0, 6)}
+                      agents={agentsById}
+                      customers={customersById}
+                      onEdit={(id) => openModal("call", id)}
+                      onDelete={(id) =>
+                        askDelete("Delete Call?", "Delete this call?", () =>
+                          deleteCall({ data: { id } }).then(() => undefined),
+                        )
+                      }
+                      compact
+                    />
+                  </div>
+                  {todayCallback.length > 0 ? (
+                    <div>
+                      <div className="mb-2 flex items-center justify-between">
+                        <h3 className="text-xs font-semibold uppercase tracking-wide text-muted">
+                          Callback
+                        </h3>
+                        <span className="text-xs font-bold text-primary">
+                          {todayCallback.length}
+                        </span>
+                      </div>
+                      <CallsTable
+                        calls={todayCallback.slice(0, 6)}
+                        agents={agentsById}
+                        customers={customersById}
+                        onEdit={(id) => openModal("call", id)}
+                        onDelete={(id) =>
+                          askDelete("Delete Call?", "Delete this call?", () =>
+                            deleteCall({ data: { id } }).then(() => undefined),
+                          )
+                        }
+                        compact
+                      />
+                    </div>
+                  ) : null}
+                </div>
               </Card>
               <Card>
                 <CardHeader
@@ -1337,8 +1582,8 @@ export function ZynloApp({ initial }: { initial: ZynloData }) {
             <Header
               title="Call Log"
               onExport={() => openModal("export")}
-              primaryLabel="Log Call"
-              onPrimary={() => openModal("call")}
+              primaryLabel="Quick Log"
+              onPrimary={() => openModal("quick")}
             />
             <Toolbar>
               <SearchBox
@@ -1367,6 +1612,18 @@ export function ZynloApp({ initial }: { initial: ZynloData }) {
                 {data.agents.map((a) => (
                   <option key={a.id} value={a.id}>
                     {a.name}
+                  </option>
+                ))}
+              </select>
+              <select
+                className={inputClass + " w-auto min-w-[140px]"}
+                value={callType}
+                onChange={(e) => setCallType(e.target.value)}
+              >
+                <option value="">All Types</option>
+                {CALL_TYPES.map((t) => (
+                  <option key={t} value={t}>
+                    {t}
                   </option>
                 ))}
               </select>
@@ -1403,8 +1660,8 @@ export function ZynloApp({ initial }: { initial: ZynloData }) {
             <Header
               title="Messages"
               onExport={() => openModal("export")}
-              primaryLabel="Log Message"
-              onPrimary={() => openModal("message")}
+              primaryLabel="Quick Log"
+              onPrimary={() => openModal("quick")}
             />
             <Toolbar>
               <SearchBox
@@ -1585,8 +1842,8 @@ export function ZynloApp({ initial }: { initial: ZynloData }) {
                         <tr className="bg-purple-50 text-left text-[11px] font-semibold uppercase tracking-wide text-muted">
                           <th className="px-4 py-3">Agent</th>
                           <th className="px-4 py-3">Role</th>
-                          <th className="px-4 py-3">Calls</th>
-                          <th className="px-4 py-3">Msgs</th>
+                          <th className="px-4 py-3">Calls today</th>
+                          <th className="px-4 py-3">Msgs today</th>
                           <th className="px-4 py-3">Avg Time</th>
                           <th className="px-4 py-3">Resolution</th>
                           <th className="px-4 py-3">QA</th>
@@ -1597,8 +1854,8 @@ export function ZynloApp({ initial }: { initial: ZynloData }) {
                       <tbody>
                         {data.agents.map((a) => {
                           const s = getAgentStats(data, a.id);
-                          const rate = s.total
-                            ? Math.round(s.resolutionRate * 100)
+                          const rate = s.todayCalls
+                            ? Math.round(s.todayResolutionRate * 100)
                             : 0;
                           return (
                             <tr
@@ -1618,11 +1875,11 @@ export function ZynloApp({ initial }: { initial: ZynloData }) {
                               </td>
                               <td className="px-4 py-3">{a.role}</td>
                               <td className="px-4 py-3 font-semibold">
-                                {s.total}
+                                {s.todayCalls}
                               </td>
-                              <td className="px-4 py-3">{s.messages}</td>
+                              <td className="px-4 py-3">{s.todayMessages}</td>
                               <td className="px-4 py-3">
-                                {formatDuration(s.avgDuration)}
+                                {formatDuration(s.todayAvgDuration)}
                               </td>
                               <td className="px-4 py-3">
                                 <div className="flex items-center gap-2">
@@ -1636,12 +1893,20 @@ export function ZynloApp({ initial }: { initial: ZynloData }) {
                                 </div>
                               </td>
                               <td className="px-4 py-3">
-                                {s.csat ? (
-                                  <span className="text-primary">
-                                    ★ {s.csat.toFixed(1)}
-                                  </span>
+                                {s.ratedCount > 0 ? (
+                                  <div>
+                                    <span className="font-semibold text-primary">
+                                      ★ {s.csat.toFixed(1)}
+                                    </span>
+                                    <div className="text-[11px] text-muted">
+                                      {s.ratedCount} rated
+                                      {s.todayRatedCount
+                                        ? ` · today ${s.todayCsat.toFixed(1)}`
+                                        : ""}
+                                    </div>
+                                  </div>
                                 ) : (
-                                  "-"
+                                  <span className="text-muted">-</span>
                                 )}
                               </td>
                               <td className="px-4 py-3">
@@ -1677,8 +1942,8 @@ export function ZynloApp({ initial }: { initial: ZynloData }) {
                   <div className="space-y-3 p-4 md:hidden">
                     {data.agents.map((a) => {
                       const s = getAgentStats(data, a.id);
-                      const rate = s.total
-                        ? Math.round(s.resolutionRate * 100)
+                      const rate = s.todayCalls
+                        ? Math.round(s.todayResolutionRate * 100)
                         : 0;
                       return (
                         <MobileCard
@@ -1686,10 +1951,16 @@ export function ZynloApp({ initial }: { initial: ZynloData }) {
                           title={a.name}
                           subtitle={`${a.role} · ${a.status}`}
                           rows={[
-                            ["Calls", String(s.total)],
-                            ["Messages", String(s.messages)],
-                            ["Avg Time", formatDuration(s.avgDuration)],
+                            ["Calls today", String(s.todayCalls)],
+                            ["Msgs today", String(s.todayMessages)],
+                            ["Avg Time", formatDuration(s.todayAvgDuration)],
                             ["Resolution", `${rate}%`],
+                            [
+                              "QA",
+                              s.ratedCount
+                                ? `★ ${s.csat.toFixed(1)} (${s.ratedCount} rated)`
+                                : "-",
+                            ],
                           ]}
                           onEdit={() => openModal("agent", a.id)}
                           onDelete={() =>
@@ -2094,6 +2365,13 @@ export function ZynloApp({ initial }: { initial: ZynloData }) {
                             Edit
                           </Btn>
                           <Btn
+                            variant="secondary"
+                            onClick={() => openModal("quick", client.id)}
+                          >
+                            <Plus className="h-4 w-4" />
+                            Quick Log
+                          </Btn>
+                          <Btn
                             onClick={() => exportCsv("client-report", client.id)}
                           >
                             <Download className="h-4 w-4" />
@@ -2188,6 +2466,7 @@ export function ZynloApp({ initial }: { initial: ZynloData }) {
                                 <th className="px-4 py-2">When</th>
                                 <th className="px-4 py-2">Agent</th>
                                 <th className="px-4 py-2">Customer</th>
+                                <th className="px-4 py-2">Phone</th>
                                 <th className="px-4 py-2">Type</th>
                                 <th className="px-4 py-2">Duration</th>
                                 <th className="px-4 py-2">Outcome</th>
@@ -2208,6 +2487,10 @@ export function ZynloApp({ initial }: { initial: ZynloData }) {
                                   </td>
                                   <td className="px-4 py-2">
                                     {customersById[call.customerId]?.name ||
+                                      "-"}
+                                  </td>
+                                  <td className="whitespace-nowrap px-4 py-2">
+                                    {customersById[call.customerId]?.phone ||
                                       "-"}
                                   </td>
                                   <td className="px-4 py-2">{call.type}</td>
@@ -2477,6 +2760,219 @@ export function ZynloApp({ initial }: { initial: ZynloData }) {
 
       {/* Call modal */}
       <Modal
+        open={modal === "quick"}
+        onClose={() => setModal(null)}
+        title="Quick Log"
+        footer={
+          <>
+            <Btn variant="secondary" onClick={() => setModal(null)}>
+              Cancel
+            </Btn>
+            <Btn type="submit" form="quick-form" disabled={busy}>
+              {busy ? "Saving…" : "Save"}
+            </Btn>
+          </>
+        }
+      >
+        <form
+          id="quick-form"
+          onSubmit={onSaveQuick}
+          className="grid grid-cols-1 gap-4 sm:grid-cols-2"
+        >
+          <div className="sm:col-span-2 flex gap-2">
+            <button
+              type="button"
+              className={
+                "flex-1 rounded-lg border-2 px-3 py-2 text-sm font-semibold " +
+                (quickForm.mode === "call"
+                  ? "border-primary bg-primary text-white"
+                  : "border-border bg-white text-fg")
+              }
+              onClick={() => setQuickForm((f) => ({ ...f, mode: "call" }))}
+            >
+              Call
+            </button>
+            <button
+              type="button"
+              className={
+                "flex-1 rounded-lg border-2 px-3 py-2 text-sm font-semibold " +
+                (quickForm.mode === "message"
+                  ? "border-primary bg-primary text-white"
+                  : "border-border bg-white text-fg")
+              }
+              onClick={() => setQuickForm((f) => ({ ...f, mode: "message" }))}
+            >
+              Message
+            </button>
+          </div>
+          <Field label="Phone *">
+            <input
+              required
+              type="tel"
+              className={inputClass}
+              value={quickForm.phone}
+              onChange={(e) => {
+                const phone = e.target.value;
+                const match = findCustomerByPhone(data.customers, phone);
+                setQuickForm((f) => ({
+                  ...f,
+                  phone,
+                  // Only auto-fill name if the field is still empty — never overwrite a typed name
+                  name: f.name.trim() ? f.name : match?.name || "",
+                  // Only suggest client when empty
+                  clientId: f.clientId ? f.clientId : match?.clientId || "",
+                }));
+              }}
+              placeholder="Customer phone"
+            />
+          </Field>
+          <Field label="Name">
+            <input
+              className={inputClass}
+              value={quickForm.name}
+              onChange={(e) =>
+                setQuickForm((f) => ({ ...f, name: e.target.value }))
+              }
+              placeholder="Customer name (saved with this log)"
+            />
+          </Field>
+          <Field label="Agent *">
+            <select
+              required
+              className={inputClass}
+              value={quickForm.agentId}
+              onChange={(e) =>
+                setQuickForm((f) => ({ ...f, agentId: e.target.value }))
+              }
+            >
+              <option value="">Select agent</option>
+              {data.agents.map((a) => (
+                <option key={a.id} value={a.id}>
+                  {a.name}
+                </option>
+              ))}
+            </select>
+          </Field>
+          <Field label="Client">
+            <select
+              className={inputClass}
+              value={quickForm.clientId}
+              onChange={(e) =>
+                setQuickForm((f) => ({ ...f, clientId: e.target.value }))
+              }
+            >
+              <option value="">None</option>
+              {data.clients.map((c) => (
+                <option key={c.id} value={c.id}>
+                  {c.name}
+                </option>
+              ))}
+            </select>
+          </Field>
+          {quickForm.mode === "call" ? (
+            <>
+              <Field label="Type of call">
+                <select
+                  className={inputClass}
+                  value={quickForm.type}
+                  onChange={(e) =>
+                    setQuickForm((f) => ({ ...f, type: e.target.value }))
+                  }
+                >
+                  {CALL_TYPES.map((t) => (
+                    <option key={t} value={t}>
+                      {t}
+                    </option>
+                  ))}
+                </select>
+              </Field>
+              <Field label="Duration (min)">
+                <input
+                  className={inputClass}
+                  value={quickForm.duration}
+                  onChange={(e) =>
+                    setQuickForm((f) => ({ ...f, duration: e.target.value }))
+                  }
+                />
+              </Field>
+              <Field label="Outcome">
+                <select
+                  className={inputClass}
+                  value={quickForm.outcome}
+                  onChange={(e) =>
+                    setQuickForm((f) => ({ ...f, outcome: e.target.value }))
+                  }
+                >
+                  {OUTCOMES.map((o) => (
+                    <option key={o} value={o}>
+                      {o}
+                    </option>
+                  ))}
+                </select>
+              </Field>
+              <Field label="QA score">
+                <select
+                  className={inputClass}
+                  value={quickForm.rating}
+                  onChange={(e) =>
+                    setQuickForm((f) => ({ ...f, rating: e.target.value }))
+                  }
+                >
+                  <option value="">Not rated</option>
+                  <option value="5">5</option>
+                  <option value="4">4</option>
+                  <option value="3">3</option>
+                  <option value="2">2</option>
+                  <option value="1">1</option>
+                </select>
+              </Field>
+            </>
+          ) : (
+            <Field label="Channel">
+              <select
+                className={inputClass}
+                value={quickForm.channel}
+                onChange={(e) =>
+                  setQuickForm((f) => ({ ...f, channel: e.target.value }))
+                }
+              >
+                {MESSAGE_CHANNELS.map((c) => (
+                  <option key={c} value={c}>
+                    {c}
+                  </option>
+                ))}
+              </select>
+            </Field>
+          )}
+          <Field label="When">
+            <input
+              type="datetime-local"
+              className={inputClass}
+              value={quickForm.datetime}
+              onChange={(e) =>
+                setQuickForm((f) => ({ ...f, datetime: e.target.value }))
+              }
+            />
+          </Field>
+          <Field label="Notes *" className="sm:col-span-2">
+            <textarea
+              required
+              className={inputClass + " min-h-[90px]"}
+              value={quickForm.notes}
+              onChange={(e) =>
+                setQuickForm((f) => ({ ...f, notes: e.target.value }))
+              }
+              placeholder="Ticket ID, summary, next step…"
+            />
+          </Field>
+          <p className="sm:col-span-2 text-xs text-muted">
+            One step: saves to the shared call/message log. Existing numbers are
+            matched automatically; new numbers create a customer.
+          </p>
+        </form>
+      </Modal>
+
+      <Modal
         open={modal === "call"}
         onClose={() => setModal(null)}
         title={editId ? "Edit Call" : "Log New Call"}
@@ -2538,7 +3034,7 @@ export function ZynloApp({ initial }: { initial: ZynloData }) {
                   setCallForm((f) => ({
                     ...f,
                     customerId: cid,
-                    clientId: cu?.clientId || f.clientId,
+                    clientId: f.clientId ? f.clientId : cu?.clientId || "",
                   }));
                 }}
               >
@@ -2696,7 +3192,7 @@ export function ZynloApp({ initial }: { initial: ZynloData }) {
                   setMsgForm((f) => ({
                     ...f,
                     customerId: cid,
-                    clientId: cu?.clientId || f.clientId,
+                    clientId: f.clientId ? f.clientId : cu?.clientId || "",
                   }));
                 }}
               >
@@ -3057,7 +3553,7 @@ export function ZynloApp({ initial }: { initial: ZynloData }) {
       >
         <div className="grid gap-3">
           {[
-            ["client-report", "Client bi-weekly report (CSV)", "Last 14 days: summary, customers, calls, messages, notes"],
+            ["client-report", "All client packs (bi-weekly CSV)", "One file per client - last 14 days, ready to send"],
             ["clients", "Clients summary (CSV)", "All clients with status, counts, notes"],
             ["calls", "Calls (CSV)", "Call log export"],
             ["messages", "Messages (CSV)", "Message log export"],
@@ -3167,6 +3663,7 @@ function Kpi({
   sub,
   bar,
   accent,
+  breakdown,
 }: {
   icon: React.ReactNode;
   label: string;
@@ -3174,6 +3671,7 @@ function Kpi({
   sub?: string;
   bar?: number;
   accent?: boolean;
+  breakdown?: Array<{ label: string; value: number }>;
 }) {
   return (
     <div className="animate-fade-in rounded-2xl border border-border bg-surface p-5 shadow-[0_2px_8px_rgba(167,67,255,0.06)] transition hover:-translate-y-0.5 hover:shadow-[0_8px_25px_rgba(167,67,255,0.1)]">
@@ -3193,6 +3691,26 @@ function Kpi({
       <div className="mt-1 text-[28px] font-bold leading-none">{value}</div>
       {sub && (
         <div className="mt-2 text-xs font-semibold text-primary">{sub}</div>
+      )}
+      {breakdown && breakdown.length > 0 && (
+        <div
+          className={
+            "mt-3 grid gap-2 " +
+            (breakdown.length >= 3 ? "grid-cols-3" : "grid-cols-2")
+          }
+        >
+          {breakdown.map((row) => (
+            <div
+              key={row.label}
+              className="rounded-lg bg-purple-50 px-2.5 py-2 text-center"
+            >
+              <div className="text-base font-bold text-primary">{row.value}</div>
+              <div className="text-[10px] font-semibold uppercase tracking-wide text-muted">
+                {row.label}
+              </div>
+            </div>
+          ))}
+        </div>
       )}
       {typeof bar === "number" && (
         <div className="mt-2 h-1.5 overflow-hidden rounded-full bg-border">
@@ -3319,8 +3837,14 @@ function CallsTable({
 }) {
   if (!calls.length) {
     return (
-      <div className="px-6 py-10 text-center text-sm text-muted">
-        No matching calls
+      <div
+        className={
+          compact
+            ? "px-1 py-3 text-center text-xs text-muted"
+            : "px-6 py-10 text-center text-sm text-muted"
+        }
+      >
+        {compact ? "None today" : "No matching calls"}
       </div>
     );
   }
@@ -3333,6 +3857,7 @@ function CallsTable({
               <th className="px-4 py-3">Time</th>
               <th className="px-4 py-3">Agent</th>
               <th className="px-4 py-3">Customer</th>
+              <th className="px-4 py-3">Phone</th>
               {!compact && <th className="px-4 py-3">Type</th>}
               <th className="px-4 py-3">Duration</th>
               <th className="px-4 py-3">Outcome</th>
@@ -3360,6 +3885,7 @@ function CallsTable({
                     </div>
                   </td>
                   <td className="px-4 py-3">{cu?.name || "Unknown"}</td>
+                  <td className="whitespace-nowrap px-4 py-3">{cu?.phone || "-"}</td>
                   {!compact && <td className="px-4 py-3">{c.type}</td>}
                   <td className="px-4 py-3">{formatDuration(c.duration)}</td>
                   <td className="px-4 py-3">
@@ -3396,7 +3922,9 @@ function CallsTable({
               title={cu?.name || "Unknown"}
               subtitle={formatDate(c.datetime)}
               rows={[
+                ["Phone", cu?.phone || "-"],
                 ["Agent", a?.name || "Unknown"],
+                ["Type", c.type || "Inbound"],
                 ["Duration", formatDuration(c.duration)],
                 ["Outcome", c.outcome],
                 ["QA", c.rating ? `${c.rating}/5` : "-"],

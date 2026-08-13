@@ -83,21 +83,85 @@ export function customerCompanyLabel(
   return customer.company || "-";
 }
 
+/** Digits only from a phone string. */
+export function phoneDigits(phone: string | undefined | null): string {
+  return (phone || "").replace(/\D/g, "");
+}
+
+export function callRating(c: { rating?: number | string | null }): number | null {
+  if (c.rating == null || c.rating === "") return null;
+  const n = Number(c.rating);
+  if (!Number.isFinite(n) || n <= 0) return null;
+  return n;
+}
+
+/**
+ * Match a customer by phone. Prefer exact digit match (min 7 digits).
+ */
+export function findCustomerByPhone(
+  customers: Customer[],
+  phone: string,
+): Customer | undefined {
+  const digits = phoneDigits(phone);
+  if (digits.length < 7) return undefined;
+  const exact = customers.find((c) => phoneDigits(c.phone) === digits);
+  if (exact) return exact;
+  return customers.find((c) => {
+    const d = phoneDigits(c.phone);
+    if (d.length < 7) return false;
+    if (d === digits) return true;
+    const longer = d.length >= digits.length ? d : digits;
+    const shorter = d.length >= digits.length ? digits : d;
+    if (!longer.endsWith(shorter)) return false;
+    const prefixLen = longer.length - shorter.length;
+    return prefixLen > 0 && prefixLen <= 3;
+  });
+}
+
 export function getAgentStats(data: ZynloData, agentId: string) {
   const agentCalls = data.calls.filter((c) => c.agentId === agentId);
   const agentMsgs = (data.messages || []).filter((m) => m.agentId === agentId);
+  const today = todayStr();
+  const todayCallsList = agentCalls.filter((c) =>
+    c.datetime?.startsWith(today),
+  );
+  const todayMsgsList = agentMsgs.filter((m) => m.datetime?.startsWith(today));
   const total = agentCalls.length;
   const resolved = agentCalls.filter((c) => c.outcome === "Resolved").length;
-  const rated = agentCalls.filter((c) => c.rating != null);
+  const ratedScores = agentCalls
+    .map(callRating)
+    .filter((n): n is number => n != null);
   const avgDuration = total
     ? agentCalls.reduce((s, c) => s + (c.duration || 0), 0) / total
     : 0;
-  const csat = rated.length
-    ? rated.reduce((s, c) => s + (c.rating || 0), 0) / rated.length
+  const csat = ratedScores.length
+    ? ratedScores.reduce((s, n) => s + n, 0) / ratedScores.length
+    : 0;
+  const todayResolved = todayCallsList.filter(
+    (c) => c.outcome === "Resolved",
+  ).length;
+  const todayAvgDuration = todayCallsList.length
+    ? todayCallsList.reduce((s, c) => s + (c.duration || 0), 0) /
+      todayCallsList.length
+    : 0;
+  const todayRatedScores = todayCallsList
+    .map(callRating)
+    .filter((n): n is number => n != null);
+  const todayCsat = todayRatedScores.length
+    ? todayRatedScores.reduce((s, n) => s + n, 0) / todayRatedScores.length
     : 0;
   return {
     total,
     messages: agentMsgs.length,
+    todayCalls: todayCallsList.length,
+    todayMessages: todayMsgsList.length,
+    todayAvgDuration,
+    todayResolutionRate: todayCallsList.length
+      ? todayResolved / todayCallsList.length
+      : 0,
+    todayCsat,
+    ratedCount: ratedScores.length,
+    todayRatedCount: todayRatedScores.length,
     resolved,
     resolutionRate: total ? resolved / total : 0,
     avgDuration,

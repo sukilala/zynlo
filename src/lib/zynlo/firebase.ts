@@ -266,14 +266,9 @@ export async function firebaseLoadAll(): Promise<ZynloData> {
   const clients = valuesSorted(toIdMap(root.clients), "name").map(mapClient);
   const clientLookup = buildClientLookup(clients);
 
-  const customers = valuesSorted(toIdMap(root.customers), "name").map((r) => {
-    const c = mapCustomer(r);
-    if (!c.clientId && c.company) {
-      const resolved = clientLookup.get(normName(c.company));
-      if (resolved) return { ...c, clientId: resolved };
-    }
-    return c;
-  });
+  // Use stored clientId only - do not invent links from free-text company
+  // (that re-applied old client names after users entered new ones).
+  const customers = valuesSorted(toIdMap(root.customers), "name").map(mapCustomer);
 
   const calls = valuesSorted(toIdMap(root.calls), "datetime").map((r) =>
     mapCall(
