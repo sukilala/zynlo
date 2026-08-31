@@ -88,11 +88,40 @@ export function phoneDigits(phone: string | undefined | null): string {
   return (phone || "").replace(/\D/g, "");
 }
 
-export function callRating(c: { rating?: number | string | null }): number | null {
+/** Telecom reconcile rows must not move resolution rate. */
+export function countsForResolution(c: {
+  outcome?: string;
+  source?: string | null;
+}): boolean {
+  if (c.source === "telecom") return false;
+  if (c.outcome === "Answered") return false;
+  return true;
+}
+
+export function resolutionOf(
+  calls: Array<{ outcome?: string; source?: string | null }>,
+) {
+  const eligible = calls.filter(countsForResolution);
+  const resolved = eligible.filter((c) => c.outcome === "Resolved").length;
+  return {
+    eligible: eligible.length,
+    resolved,
+    rate: eligible.length ? resolved / eligible.length : 0,
+    percent: eligible.length
+      ? Math.round((resolved / eligible.length) * 100)
+      : 0,
+  };
+}
+
+export function callRating(c: {
+  rating?: number | string | null;
+  ratingScale?: 5 | 10 | null;
+}): number | null {
   if (c.rating == null || c.rating === "") return null;
   const n = Number(c.rating);
   if (!Number.isFinite(n) || n <= 0) return null;
-  return n;
+  const out = c.ratingScale === 10 || n > 5 ? n : n * 2;
+  return Math.round(Math.min(10, out) * 10) / 10;
 }
 
 /**
@@ -103,18 +132,16 @@ export function findCustomerByPhone(
   phone: string,
 ): Customer | undefined {
   const digits = phoneDigits(phone);
-  if (digits.length < 7) return undefined;
+  if (digits.length < 8) return undefined;
   const exact = customers.find((c) => phoneDigits(c.phone) === digits);
   if (exact) return exact;
+  const want = digits.length >= 9 ? digits.slice(-9) : digits;
+  if (want.length < 8) return undefined;
   return customers.find((c) => {
     const d = phoneDigits(c.phone);
-    if (d.length < 7) return false;
-    if (d === digits) return true;
-    const longer = d.length >= digits.length ? d : digits;
-    const shorter = d.length >= digits.length ? digits : d;
-    if (!longer.endsWith(shorter)) return false;
-    const prefixLen = longer.length - shorter.length;
-    return prefixLen > 0 && prefixLen <= 3;
+    if (d.length < 8) return false;
+    const got = d.length >= 9 ? d.slice(-9) : d;
+    return got === want;
   });
 }
 
@@ -127,22 +154,23 @@ export function getAgentStats(data: ZynloData, agentId: string) {
   );
   const todayMsgsList = agentMsgs.filter((m) => m.datetime?.startsWith(today));
   const total = agentCalls.length;
-  const resolved = agentCalls.filter((c) => c.outcome === "Resolved").length;
+  const resAll = resolutionOf(agentCalls);
+  const resolved = resAll.resolved;
   const ratedScores = agentCalls
     .map(callRating)
     .filter((n): n is number => n != null);
-  const avgDuration = total
-    ? agentCalls.reduce((s, c) => s + (c.duration || 0), 0) / total
+  const timedAll = agentCalls.filter((c) => (c.duration || 0) > 0);
+  const avgDuration = timedAll.length
+    ? timedAll.reduce((s, c) => s + (c.duration || 0), 0) / timedAll.length
     : 0;
   const csat = ratedScores.length
     ? ratedScores.reduce((s, n) => s + n, 0) / ratedScores.length
     : 0;
-  const todayResolved = todayCallsList.filter(
-    (c) => c.outcome === "Resolved",
-  ).length;
-  const todayAvgDuration = todayCallsList.length
-    ? todayCallsList.reduce((s, c) => s + (c.duration || 0), 0) /
-      todayCallsList.length
+  const resToday = resolutionOf(todayCallsList);
+  const todayResolved = resToday.resolved;
+  const timedToday = todayCallsList.filter((c) => (c.duration || 0) > 0);
+  const todayAvgDuration = timedToday.length
+    ? timedToday.reduce((s, c) => s + (c.duration || 0), 0) / timedToday.length
     : 0;
   const todayRatedScores = todayCallsList
     .map(callRating)
@@ -150,22 +178,36 @@ export function getAgentStats(data: ZynloData, agentId: string) {
   const todayCsat = todayRatedScores.length
     ? todayRatedScores.reduce((s, n) => s + n, 0) / todayRatedScores.length
     : 0;
+  const week = rangeQa(agentCalls, startOfWeekStr(0), todayStr());
+  const lastWeek = rangeQa(
+    agentCalls,
+    startOfWeekStr(-1),
+    dateOffsetFrom(startOfWeekStr(0), -1),
+  );
   return {
     total,
     messages: agentMsgs.length,
     todayCalls: todayCallsList.length,
     todayMessages: todayMsgsList.length,
     todayAvgDuration,
-    todayResolutionRate: todayCallsList.length
-      ? todayResolved / todayCallsList.length
-      : 0,
+    todayResolutionRate: resToday.rate,
     todayCsat,
     ratedCount: ratedScores.length,
     todayRatedCount: todayRatedScores.length,
     resolved,
-    resolutionRate: total ? resolved / total : 0,
+    resolutionRate: resAll.rate,
     avgDuration,
     csat,
+    openFollowUps:
+      agentCalls.filter(
+        (c) => c.outcome === "Follow-up" || c.outcome === "Escalated",
+      ).length +
+      agentMsgs.filter((m) => m.status === "Open" || m.status === "Pending")
+        .length,
+    weekQa: week.avg,
+    weekRated: week.rated,
+    lastWeekQa: lastWeek.avg,
+    lastWeekRated: lastWeek.rated,
   };
 }
 
@@ -196,13 +238,16 @@ export function getCustomerStats(data: ZynloData, customerId: string) {
     lastContact,
     resolved: custCalls.filter((c) => c.outcome === "Resolved").length,
     escalated: custCalls.filter((c) => c.outcome === "Escalated").length,
-    avgDuration: custCalls.length
-      ? custCalls.reduce((s, c) => s + (c.duration || 0), 0) / custCalls.length
-      : 0,
+    avgDuration: (() => {
+      const timed = custCalls.filter((c) => (c.duration || 0) > 0);
+      return timed.length
+        ? timed.reduce((s, c) => s + (c.duration || 0), 0) / timed.length
+        : 0;
+    })(),
     qaScore: (() => {
-      const rated = custCalls.filter((c) => c.rating != null);
+      const rated = custCalls.map(callRating).filter((n): n is number => n != null);
       return rated.length
-        ? rated.reduce((s, c) => s + (c.rating || 0), 0) / rated.length
+        ? rated.reduce((s, n) => s + n, 0) / rated.length
         : 0;
     })(),
     // Notes only from call log + messages (not free-form customer profile notes)
@@ -228,21 +273,7 @@ export function getCustomerStats(data: ZynloData, customerId: string) {
 
 export function getClientStats(data: ZynloData, clientId: string) {
   const client = data.clients.find((c) => c.id === clientId);
-  const clientNameKey = (client?.name || "")
-    .toLowerCase()
-    .replace(/[^a-z0-9]/g, "");
-  const contacts = data.customers.filter((c) => {
-    if (c.clientId === clientId) return true;
-    // legacy: free-text company matches client name
-    if (
-      clientNameKey &&
-      (c.company || "").toLowerCase().replace(/[^a-z0-9]/g, "") ===
-        clientNameKey
-    ) {
-      return true;
-    }
-    return false;
-  });
+  const contacts = data.customers.filter((c) => c.clientId === clientId);
   const contactIds = new Set(contacts.map((c) => c.id));
 
   // Calls/messages linked by clientId OR by a customer who belongs to this client
@@ -268,12 +299,13 @@ export function getClientStats(data: ZynloData, clientId: string) {
   const resolved = calls.filter((c) => c.outcome === "Resolved").length;
   const escalated = calls.filter((c) => c.outcome === "Escalated").length;
   const followUp = calls.filter((c) => c.outcome === "Follow-up").length;
-  const rated = calls.filter((c) => c.rating != null);
-  const avgDuration = calls.length
-    ? calls.reduce((s, c) => s + (c.duration || 0), 0) / calls.length
+  const rated = calls.map(callRating).filter((n): n is number => n != null);
+  const timed = calls.filter((c) => (c.duration || 0) > 0);
+  const avgDuration = timed.length
+    ? timed.reduce((s, c) => s + (c.duration || 0), 0) / timed.length
     : 0;
   const avgQa = rated.length
-    ? rated.reduce((s, c) => s + (c.rating || 0), 0) / rated.length
+    ? rated.reduce((s, n) => s + n, 0) / rated.length
     : 0;
 
   const noteItems: Array<{ t: string; n: string }> = [];
@@ -360,4 +392,233 @@ export function shortNotes(text: string, max = 60): string {
   const t = (text || "").trim();
   if (!t) return "-";
   return t.length > max ? t.slice(0, max - 1) + "…" : t;
+}
+
+export function ymd(d: Date): string {
+  return (
+    d.getFullYear() +
+    "-" +
+    String(d.getMonth() + 1).padStart(2, "0") +
+    "-" +
+    String(d.getDate()).padStart(2, "0")
+  );
+}
+
+export function dateOffsetStr(days: number): string {
+  const d = new Date();
+  d.setDate(d.getDate() + days);
+  return ymd(d);
+}
+
+export function dateOffsetFrom(dateStr: string, days: number): string {
+  const d = new Date(dateStr + "T12:00:00");
+  d.setDate(d.getDate() + days);
+  return ymd(d);
+}
+
+/** Monday of the week, offsetWeeks=0 this week, -1 last week. */
+export function startOfWeekStr(offsetWeeks = 0): string {
+  const d = new Date();
+  const day = d.getDay();
+  const mondayOffset = day === 0 ? -6 : 1 - day;
+  d.setDate(d.getDate() + mondayOffset + offsetWeeks * 7);
+  return ymd(d);
+}
+
+export function rangeQa(calls: Call[], from: string, to: string) {
+  const list = calls.filter((c) => {
+    const d = (c.datetime || "").slice(0, 10);
+    return d >= from && d <= to;
+  });
+  const scores = list.map(callRating).filter((n): n is number => n != null);
+  return {
+    count: list.length,
+    rated: scores.length,
+    avg: scores.length ? scores.reduce((s, n) => s + n, 0) / scores.length : 0,
+  };
+}
+
+export function periodQa(calls: Call[], days: number) {
+  const list = filterSinceDatetime(calls, days);
+  const scores = list.map(callRating).filter((n): n is number => n != null);
+  return {
+    count: list.length,
+    rated: scores.length,
+    avg: scores.length ? scores.reduce((s, n) => s + n, 0) / scores.length : 0,
+  };
+}
+
+export type FollowUpItem = {
+  id: string;
+  kind: "call" | "message";
+  datetime: string;
+  due: string;
+  overdue: boolean;
+  hasDueDate: boolean;
+  agentId: string;
+  customerId: string;
+  clientId: string | null;
+  label: string;
+  notes: string;
+};
+
+export function getFollowUpItems(data: ZynloData): FollowUpItem[] {
+  const today = todayStr();
+  const items: FollowUpItem[] = [];
+  for (const c of data.calls) {
+    if (c.outcome !== "Follow-up" && c.outcome !== "Escalated") continue;
+    const hasDueDate = Boolean(c.followUpAt);
+    const due = hasDueDate ? String(c.followUpAt).slice(0, 10) : "";
+    items.push({
+      id: c.id,
+      kind: "call",
+      datetime: c.datetime,
+      due,
+      overdue: hasDueDate && due < today,
+      hasDueDate,
+      agentId: c.agentId,
+      customerId: c.customerId,
+      clientId: c.clientId,
+      label: c.outcome,
+      notes: c.notes || "",
+    });
+  }
+  for (const m of data.messages || []) {
+    if (m.status !== "Open" && m.status !== "Pending") continue;
+    const hasDueDate = Boolean(m.followUpAt);
+    const due = hasDueDate ? String(m.followUpAt).slice(0, 10) : "";
+    items.push({
+      id: m.id,
+      kind: "message",
+      datetime: m.datetime,
+      due,
+      overdue: hasDueDate && due < today,
+      hasDueDate,
+      agentId: m.agentId,
+      customerId: m.customerId,
+      clientId: m.clientId,
+      label: `${m.channel} · ${m.status}`,
+      notes: m.notes || m.body || "",
+    });
+  }
+  items.sort((a, b) => {
+    const ar = a.overdue ? 0 : a.hasDueDate && a.due === today ? 1 : 2;
+    const br = b.overdue ? 0 : b.hasDueDate && b.due === today ? 1 : 2;
+    if (ar !== br) return ar - br;
+    const ad = a.due || a.datetime;
+    const bd = b.due || b.datetime;
+    return ad.localeCompare(bd);
+  });
+  return items;
+}
+
+/** Open work only: overdue, due today, or no date yet. Hides future snoozed items. */
+export function getActionableFollowUps(data: ZynloData): FollowUpItem[] {
+  const today = todayStr();
+  return getFollowUpItems(data).filter((f) => {
+    if (!f.hasDueDate) return true;
+    return f.due <= today;
+  });
+}
+
+export function getUnratedRecent(data: ZynloData, days = 14): Call[] {
+  return filterSinceDatetime(data.calls, days)
+    .filter((c) => c.source !== "telecom" && c.outcome !== "Answered")
+    .filter((c) => callRating(c) == null)
+    .sort(
+      (a, b) =>
+        new Date(a.datetime).getTime() - new Date(b.datetime).getTime(),
+    );
+}
+
+export type FollowUpGroup = {
+  key: string;
+  customerId: string;
+  items: FollowUpItem[];
+};
+
+export function groupFollowUps(
+  items: FollowUpItem[],
+): FollowUpGroup[] {
+  const map = new Map<string, FollowUpGroup>();
+  for (const item of items) {
+    const key = item.customerId || item.id;
+    const g = map.get(key);
+    if (g) g.items.push(item);
+    else map.set(key, { key, customerId: item.customerId, items: [item] });
+  }
+  return Array.from(map.values());
+}
+
+export type UnratedGroup = {
+  key: string;
+  customerId: string;
+  calls: Call[];
+};
+
+export function groupUnratedCalls(calls: Call[]): UnratedGroup[] {
+  const map = new Map<string, UnratedGroup>();
+  for (const c of calls) {
+    const key = c.customerId || c.id;
+    const g = map.get(key);
+    if (g) g.calls.push(c);
+    else map.set(key, { key, customerId: c.customerId, calls: [c] });
+  }
+  return Array.from(map.values());
+}
+
+export type TimelineItem = {
+  id: string;
+  kind: "call" | "message";
+  datetime: string;
+  title: string;
+  detail: string;
+  notes: string;
+  rating: number | null;
+};
+
+export function customerTimeline(
+  data: ZynloData,
+  customerId: string,
+): TimelineItem[] {
+  const items: TimelineItem[] = [];
+  for (const c of data.calls.filter((x) => x.customerId === customerId)) {
+    items.push({
+      id: c.id,
+      kind: "call",
+      datetime: c.datetime,
+      title: `${c.type} · ${c.outcome}`,
+      detail: formatDuration(c.duration),
+      notes: c.notes || "",
+      rating: callRating(c),
+    });
+  }
+  for (const m of (data.messages || []).filter((x) => x.customerId === customerId)) {
+    items.push({
+      id: m.id,
+      kind: "message",
+      datetime: m.datetime,
+      title: `${m.channel} · ${m.direction} · ${m.status}`,
+      detail: m.subject || "",
+      notes: (m.notes || m.body || "").trim(),
+      rating: null,
+    });
+  }
+  items.sort(
+    (a, b) => new Date(b.datetime).getTime() - new Date(a.datetime).getTime(),
+  );
+  return items;
+}
+
+export function customersSharingPhone(
+  customers: Customer[],
+  phone: string,
+  exceptId?: string,
+): Customer[] {
+  const digits = phoneDigits(phone);
+  if (digits.length < 7) return [];
+  return customers.filter((c) => {
+    if (exceptId && c.id === exceptId) return false;
+    return phoneDigits(c.phone) === digits;
+  });
 }

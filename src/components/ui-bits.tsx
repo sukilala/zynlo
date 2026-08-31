@@ -17,7 +17,7 @@ export function Badge({
     default: "bg-purple-100 text-purple-700",
     strong: "bg-primary text-white",
     soft: "bg-purple-50 text-purple-600",
-    outline: "bg-white text-purple-700 border border-border",
+    outline: "bg-surface text-purple-700 border border-border",
   };
   return (
     <span
@@ -39,7 +39,7 @@ export function Avatar({ name }: { name: string }) {
     .map((p) => p[0]?.toUpperCase() ?? "")
     .join("");
   return (
-    <span className="inline-flex h-8 w-8 shrink-0 items-center justify-center rounded-full bg-gradient-to-br from-primary to-primary-light text-xs font-bold text-white shadow-[0_2px_8px_rgba(167,67,255,0.25)]">
+    <span className="inline-flex h-8 w-8 shrink-0 items-center justify-center rounded-full bg-gradient-to-br from-primary to-primary-light text-xs font-bold text-white shadow-[0_2px_8px_rgba(167,67,255,0.35)]">
       {initials || "?"}
     </span>
   );
@@ -58,12 +58,12 @@ export function Btn({
 }) {
   const variants = {
     primary:
-      "bg-primary text-white shadow-[0_4px_15px_rgba(167,67,255,0.25)] hover:bg-primary-dark",
+      "bg-primary text-white shadow-[0_4px_15px_rgba(167,67,255,0.35)] hover:bg-primary-dark",
     secondary:
-      "bg-white border border-border text-fg hover:border-primary hover:text-primary",
+      "bg-surface border border-border text-fg hover:border-primary hover:text-primary",
     ghost: "bg-transparent text-muted hover:bg-purple-50 hover:text-primary",
     danger:
-      "bg-white border border-purple-300 text-purple-700 hover:bg-purple-50",
+      "bg-surface border border-purple-300 text-purple-700 hover:bg-purple-50",
   };
   const sizes = {
     sm: "px-3 py-1.5 text-xs",
@@ -96,7 +96,7 @@ export function Card({
   return (
     <div
       className={cn(
-        "overflow-hidden rounded-2xl border border-border bg-surface shadow-[0_2px_8px_rgba(167,67,255,0.06)]",
+        "overflow-hidden rounded-2xl border border-border bg-surface shadow-[0_2px_16px_rgba(0,0,0,0.28)]",
         className,
       )}
     >
@@ -140,7 +140,7 @@ export function Field({
 }
 
 export const inputClass =
-  "w-full rounded-[10px] border border-border bg-white px-3.5 py-2.5 text-sm text-fg outline-none transition focus:border-primary focus:shadow-[0_0_0_3px_rgba(167,67,255,0.12)]";
+  "w-full rounded-[10px] border border-border bg-bg px-3.5 py-2.5 text-base text-fg md:text-sm outline-none transition focus:border-primary focus:shadow-[0_0_0_3px_rgba(167,67,255,0.25)]";
 
 export function Modal({
   open,
@@ -160,14 +160,14 @@ export function Modal({
   if (!open) return null;
   return (
     <div
-      className="fixed inset-0 z-[1000] flex items-center justify-center bg-[rgba(26,11,46,0.6)] p-4 backdrop-blur-sm"
+      className="fixed inset-0 z-[1000] flex items-center justify-center bg-[rgba(8,4,16,0.72)] p-4 backdrop-blur-sm"
       onClick={(e) => {
         if (e.target === e.currentTarget) onClose();
       }}
     >
       <div
         className={cn(
-          "max-h-[90vh] w-full overflow-y-auto rounded-[20px] bg-white shadow-[0_25px_80px_rgba(26,11,46,0.3)]",
+          "max-h-[90vh] w-full overflow-y-auto rounded-[20px] bg-surface shadow-[0_25px_80px_rgba(0,0,0,0.55)]",
           wide ? "max-w-2xl" : "max-w-lg",
         )}
         role="dialog"
@@ -214,11 +214,14 @@ export function EmptyState({
 }
 
 export function Stars({ rating }: { rating: number | null | undefined }) {
-  if (!rating) return <span className="text-muted">-</span>;
+  if (rating == null || Number(rating) <= 0) {
+    return <span className="text-muted">-</span>;
+  }
+  const n = Number(rating);
+  const label = n % 1 ? n.toFixed(1) : String(n);
   return (
-    <span className="tracking-wider text-primary" aria-label={`${rating} of 5`}>
-      {"★".repeat(rating)}
-      <span className="text-purple-200">{"★".repeat(5 - rating)}</span>
+    <span className="font-semibold text-primary" aria-label={`${label} of 10`}>
+      {label}/10
     </span>
   );
 }
@@ -235,7 +238,7 @@ export function ToastStack({
       {toasts.map((t) => (
         <div
           key={t.id}
-          className="pointer-events-auto animate-slide-in flex min-w-[260px] max-w-sm items-center gap-2 rounded-xl border border-border border-l-4 border-l-primary bg-white px-4 py-3 text-sm font-medium shadow-lg"
+          className="pointer-events-auto animate-slide-in flex min-w-[260px] max-w-sm items-center gap-2 rounded-xl border border-border border-l-4 border-l-primary bg-surface px-4 py-3 text-sm font-medium shadow-lg"
           onClick={() => onDismiss(t.id)}
         >
           {t.message}

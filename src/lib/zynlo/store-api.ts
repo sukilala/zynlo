@@ -8,6 +8,7 @@ import {
   firebaseDeleteCustomer,
   firebaseDeleteMessage,
   firebaseLoadAll,
+  firebaseMergeCustomers,
   firebaseUpsertAgent,
   firebaseUpsertCall,
   firebaseUpsertClient,
@@ -83,6 +84,7 @@ export async function upsertCall(body: Record<string, unknown>) {
         ? null
         : Number(body.rating),
     notes: body.notes != null ? String(body.notes) : undefined,
+    followUpAt: body.followUpAt ? String(body.followUpAt).slice(0, 10) : null,
   });
 }
 
@@ -103,9 +105,14 @@ export async function upsertMessage(body: Record<string, unknown>) {
     body: String(body.body || ""),
     status: body.status != null ? String(body.status) : undefined,
     notes: body.notes != null ? String(body.notes) : undefined,
+    followUpAt: body.followUpAt ? String(body.followUpAt).slice(0, 10) : null,
   });
 }
 
 export async function removeMessage(id: string) {
   await firebaseDeleteMessage(id);
+}
+
+export async function mergeCustomers(keepId: string, dropId: string) {
+  await firebaseMergeCustomers(keepId, dropId);
 }

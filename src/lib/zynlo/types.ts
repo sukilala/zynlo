@@ -6,7 +6,8 @@ export type CallOutcome =
   | "Escalated"
   | "Follow-up"
   | "No Answer"
-  | "Voicemail";
+  | "Voicemail"
+  | "Answered";
 
 /** Message channels for non-voice conversations */
 export type MessageChannel =
@@ -68,7 +69,12 @@ export interface Call {
   duration: number;
   outcome: CallOutcome;
   rating: number | null;
+  /** 5 = legacy. 10 = current QA. Missing + rating <= 5 is treated as /5. */
+  ratingScale?: 5 | 10;
   notes: string;
+  followUpAt: string | null;
+  /** manual = agent log. telecom = file reconcile. Never overwrite manual. */
+  source?: "manual" | "telecom";
 }
 
 /** Logged SMS / chat / email conversation touchpoint */
@@ -84,6 +90,7 @@ export interface Message {
   body: string;
   status: MessageStatus;
   notes: string;
+  followUpAt: string | null;
 }
 
 export interface ZynloData {
@@ -100,6 +107,7 @@ export const OUTCOMES: CallOutcome[] = [
   "Follow-up",
   "No Answer",
   "Voicemail",
+  "Answered",
 ];
 
 export const CALL_TYPES: CallType[] = ["Inbound", "Outbound", "Callback"];

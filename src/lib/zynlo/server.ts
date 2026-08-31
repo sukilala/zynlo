@@ -11,6 +11,7 @@ import {
   firebaseUpsertClient,
   firebaseUpsertCustomer,
   firebaseUpsertMessage,
+  firebaseMergeCustomers,
 } from "./firebase";
 import type {
   Agent,
@@ -101,14 +102,17 @@ export const saveCall = createServerFn({ method: "POST" })
     (d: {
       id?: string;
       datetime: string;
-      agentId: string;
+      agentId?: string;
       customerId: string;
       clientId?: string | null;
       type?: string;
       duration: number;
       outcome: string;
       rating?: number | null;
+      ratingScale?: 5 | 10;
       notes?: string;
+      followUpAt?: string | null;
+      source?: "manual" | "telecom";
     }) => d,
   )
   .handler(async ({ data }): Promise<Call> => firebaseUpsertCall(data));
@@ -134,6 +138,7 @@ export const saveMessage = createServerFn({ method: "POST" })
       body: string;
       status?: string;
       notes?: string;
+      followUpAt?: string | null;
     }) => d,
   )
   .handler(async ({ data }): Promise<Message> => firebaseUpsertMessage(data));
@@ -142,5 +147,12 @@ export const deleteMessage = createServerFn({ method: "POST" })
   .validator((d: { id: string }) => d)
   .handler(async ({ data }) => {
     await firebaseDeleteMessage(data.id);
+    return { ok: true };
+  });
+
+export const mergeCustomers = createServerFn({ method: "POST" })
+  .validator((d: { keepId: string; dropId: string }) => d)
+  .handler(async ({ data }) => {
+    await firebaseMergeCustomers(data.keepId, data.dropId);
     return { ok: true };
   });

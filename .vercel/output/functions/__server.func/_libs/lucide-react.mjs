@@ -1,4 +1,4 @@
-import { i as __toESM } from "../_runtime.mjs";
+import { o as __toESM } from "../_runtime.mjs";
 import { N as require_react } from "./@tanstack/react-router+[...].mjs";
 //#region node_modules/lucide-react/dist/esm/shared/src/utils.js
 var import_react = /* @__PURE__ */ __toESM(require_react());
@@ -194,6 +194,58 @@ var Download = createLucideIcon("download", [
 		y1: "15",
 		y2: "3",
 		key: "1vk2je"
+	}]
+]);
+/**
+* @license lucide-react v0.510.0 - ISC
+*
+* This source code is licensed under the ISC license.
+* See the LICENSE file in the root directory of this source tree.
+*/
+var FileText = createLucideIcon("file-text", [
+	["path", {
+		d: "M15 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V7Z",
+		key: "1rqfz7"
+	}],
+	["path", {
+		d: "M14 2v4a2 2 0 0 0 2 2h4",
+		key: "tnqrlb"
+	}],
+	["path", {
+		d: "M10 9H8",
+		key: "b1mrlr"
+	}],
+	["path", {
+		d: "M16 13H8",
+		key: "t4e002"
+	}],
+	["path", {
+		d: "M16 17H8",
+		key: "z1uh3a"
+	}]
+]);
+/**
+* @license lucide-react v0.510.0 - ISC
+*
+* This source code is licensed under the ISC license.
+* See the LICENSE file in the root directory of this source tree.
+*/
+var FileUp = createLucideIcon("file-up", [
+	["path", {
+		d: "M15 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V7Z",
+		key: "1rqfz7"
+	}],
+	["path", {
+		d: "M14 2v4a2 2 0 0 0 2 2h4",
+		key: "tnqrlb"
+	}],
+	["path", {
+		d: "M12 12v6",
+		key: "3ahymv"
+	}],
+	["path", {
+		d: "m15 15-3-3-3 3",
+		key: "15xj92"
 	}]
 ]);
 /**
@@ -429,4 +481,4 @@ var X = createLucideIcon("x", [["path", {
 	key: "d8bk6v"
 }]]);
 //#endregion
-export { Building2 as _, Trash2 as a, Plus as c, MessageSquare as d, Menu as f, ChartColumn as g, ClipboardList as h, TrendingUp as i, Phone as l, Download as m, Users as n, Star as o, LayoutDashboard as p, UserRound as r, Search as s, X as t, Pencil as u };
+export { ClipboardList as _, Trash2 as a, Plus as c, MessageSquare as d, Menu as f, Download as g, FileText as h, TrendingUp as i, Phone as l, FileUp as m, Users as n, Star as o, LayoutDashboard as p, UserRound as r, Search as s, X as t, Pencil as u, ChartColumn as v, Building2 as y };

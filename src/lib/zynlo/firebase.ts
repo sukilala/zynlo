@@ -24,6 +24,19 @@ const COLLECTIONS = [
 
 type Collection = (typeof COLLECTIONS)[number];
 
+const collectionCache: Partial<
+  Record<Collection, { etag: string; data: unknown }>
+> = {};
+let mappedCache: { at: number; data: ZynloData } | null = null;
+
+function invalidateCache(col?: Collection) {
+  mappedCache = null;
+  if (col) delete collectionCache[col];
+  else {
+    for (const c of COLLECTIONS) delete collectionCache[c];
+  }
+}
+
 function uid() {
   return Date.now().toString(36) + Math.random().toString(36).slice(2, 10);
 }
@@ -50,6 +63,7 @@ async function rtdbFetch<T>(
       `Firebase ${init?.method || "GET"} ${path} failed (${res.status}): ${text || res.statusText}`,
     );
   }
+  if ((init?.method || "GET").toUpperCase() === "DELETE") return null as T;
   const text = await res.text();
   if (!text || text === "null") return null as T;
   return JSON.parse(text) as T;
@@ -100,43 +114,45 @@ function needsMigration(raw: unknown): boolean {
 let migratePromise: Promise<void> | null = null;
 
 /** One-time (per process) convert array collections → maps by id. */
-export async function ensureFirebaseMaps(): Promise<void> {
-  if (!migratePromise) {
-    migratePromise = (async () => {
-      const root = await rtdbFetch<Record<string, unknown> | null>(
-        "/.json",
-      );
-      if (!root) return;
-      const updates: Record<string, Record<string, unknown>> = {};
-      for (const col of COLLECTIONS) {
-        const raw = root[col];
-        if (needsMigration(raw)) {
-          updates[col] = toIdMap(raw);
-        } else if (raw == null) {
-          // leave null
-        } else if (typeof raw === "object" && !Array.isArray(raw)) {
-          // already map-like; ensure every entry has id
-          const m = toIdMap(raw);
-          updates[col] = m;
-        }
-      }
-      // Only rewrite collections that were arrays / sparse
-      for (const col of COLLECTIONS) {
-        const raw = root[col];
-        if (needsMigration(raw)) {
-          await rtdbFetch(`/${col}.json`, {
-            method: "PUT",
-            body: JSON.stringify(updates[col] || {}),
-          });
-          console.log("[firebase] migrated", col, "to id-map");
-        }
-      }
-    })().catch((err) => {
-      migratePromise = null;
-      throw err;
-    });
+async function rtdbGetCollection(col: Collection): Promise<unknown> {
+  const path = `/${col}.json`;
+  const url = `${RTDB_ROOT}${path}`;
+  const headers: Record<string, string> = {
+    Accept: "application/json",
+    "X-Firebase-ETag": "true",
+  };
+  const prev = collectionCache[col];
+  if (prev?.etag) headers["If-None-Match"] = prev.etag;
+  const res = await fetch(url, { headers, cache: "no-store" });
+  if (res.status === 304 && prev) return prev.data;
+  if (!res.ok) {
+    const text = await res.text().catch(() => "");
+    throw new Error(
+      `Firebase GET ${path} failed (${res.status}): ${text || res.statusText}`,
+    );
   }
-  await migratePromise;
+  const etag = res.headers.get("ETag") || res.headers.get("etag") || "";
+  const text = await res.text();
+  const data = !text || text === "null" ? null : JSON.parse(text);
+  if (etag) collectionCache[col] = { etag, data };
+  return data;
+}
+
+async function loadCollections(): Promise<Record<string, unknown>> {
+  const entries = await Promise.all(
+    COLLECTIONS.map(async (col) => {
+      const raw = await rtdbGetCollection(col);
+      return [col, raw] as const;
+    }),
+  );
+  const root: Record<string, unknown> = {};
+  for (const [col, raw] of entries) root[col] = raw;
+  return root;
+}
+
+export async function ensureFirebaseMaps(): Promise<void> {
+  // Never rewrite a whole collection. That path used to PUT /calls.json
+  // and could wipe saved calls.
 }
 
 function mapAgent(r: Record<string, unknown>): Agent {
@@ -194,7 +210,15 @@ function mapCall(
     duration: Number(r.duration) || 0,
     outcome: (r.outcome as Call["outcome"]) || "Resolved",
     rating: r.rating == null || r.rating === "" ? null : Number(r.rating),
+    ratingScale:
+      r.ratingScale === 10 || Number(r.rating) > 5
+        ? 10
+        : r.rating == null || r.rating === ""
+          ? undefined
+          : 5,
     notes: String(r.notes || ""),
+    followUpAt: r.followUpAt ? String(r.followUpAt).slice(0, 10) : null,
+    source: r.source === "telecom" ? "telecom" : "manual",
   };
 }
 
@@ -211,6 +235,7 @@ function mapMessage(r: Record<string, unknown>): Message {
     body: String(r.body || ""),
     status: (r.status as Message["status"]) || "Open",
     notes: String(r.notes || ""),
+    followUpAt: r.followUpAt ? String(r.followUpAt).slice(0, 10) : null,
   };
 }
 
@@ -258,9 +283,15 @@ function resolveClientId(
 }
 
 export async function firebaseLoadAll(): Promise<ZynloData> {
-  await ensureFirebaseMaps();
-  const root =
-    (await rtdbFetch<Record<string, unknown> | null>("/.json")) || {};
+  if (mappedCache && Date.now() - mappedCache.at < 20000) {
+    return mappedCache.data;
+  }
+  const root = await loadCollections();
+  for (const col of COLLECTIONS) {
+    if (needsMigration(root[col])) {
+      root[col] = toIdMap(root[col]);
+    }
+  }
 
   const agents = valuesSorted(toIdMap(root.agents), "name").map(mapAgent);
   const clients = valuesSorted(toIdMap(root.clients), "name").map(mapClient);
@@ -280,7 +311,15 @@ export async function firebaseLoadAll(): Promise<ZynloData> {
     mapMessage,
   );
 
-  return { agents, customers, clients, calls, messages };
+  const data = { agents, customers, clients, calls, messages };
+  mappedCache = { at: Date.now(), data };
+  return data;
+}
+
+function assertRecordId(id: string) {
+  if (!id || id.length < 6 || id.includes("/") || id.includes(".")) {
+    throw new Error("Invalid record id");
+  }
 }
 
 async function putItem(
@@ -288,18 +327,25 @@ async function putItem(
   id: string,
   row: Record<string, unknown>,
 ): Promise<void> {
-  await ensureFirebaseMaps();
-  await rtdbFetch(`/${collection}/${encodeURIComponent(id)}.json`, {
+  assertRecordId(id);
+  invalidateCache(collection);
+  const payload = { ...row, id, updatedAt: new Date().toISOString() };
+  const path = `/${collection}/${encodeURIComponent(id)}.json`;
+  const saved = await rtdbFetch<Record<string, unknown> | null>(path, {
     method: "PUT",
-    body: JSON.stringify({ ...row, id, updatedAt: new Date().toISOString() }),
+    body: JSON.stringify(payload),
   });
+  if (!saved || typeof saved !== "object") {
+    throw new Error(`Save did not persist to ${collection}`);
+  }
 }
 
 async function deleteItem(
   collection: Collection,
   id: string,
 ): Promise<void> {
-  await ensureFirebaseMaps();
+  assertRecordId(id);
+  invalidateCache(collection);
   await rtdbFetch(`/${collection}/${encodeURIComponent(id)}.json`, {
     method: "DELETE",
   });
@@ -327,16 +373,7 @@ export async function firebaseUpsertAgent(input: {
 }
 
 export async function firebaseDeleteAgent(id: string): Promise<void> {
-  const data = await firebaseLoadAll();
-  await Promise.all([
-    deleteItem("agents", id),
-    ...data.calls
-      .filter((c) => c.agentId === id)
-      .map((c) => deleteItem("calls", c.id)),
-    ...data.messages
-      .filter((m) => m.agentId === id)
-      .map((m) => deleteItem("messages", m.id)),
-  ]);
+  await deleteItem("agents", id);
 }
 
 export async function firebaseUpsertCustomer(input: {
@@ -367,16 +404,7 @@ export async function firebaseUpsertCustomer(input: {
 }
 
 export async function firebaseDeleteCustomer(id: string): Promise<void> {
-  const data = await firebaseLoadAll();
-  await Promise.all([
-    deleteItem("customers", id),
-    ...data.calls
-      .filter((c) => c.customerId === id)
-      .map((c) => deleteItem("calls", c.id)),
-    ...data.messages
-      .filter((m) => m.customerId === id)
-      .map((m) => deleteItem("messages", m.id)),
-  ]);
+  await deleteItem("customers", id);
 }
 
 export async function firebaseUpsertClient(input: {
@@ -415,34 +443,66 @@ export async function firebaseDeleteClient(id: string): Promise<void> {
 export async function firebaseUpsertCall(input: {
   id?: string;
   datetime: string;
-  agentId: string;
+  agentId?: string;
   customerId: string;
   clientId?: string | null;
   type?: string;
   duration: number;
   outcome: string;
   rating?: number | null;
+  ratingScale?: 5 | 10;
   notes?: string;
+  followUpAt?: string | null;
+  source?: "manual" | "telecom";
 }): Promise<Call> {
-  if (!input.datetime || !input.agentId || !input.customerId) {
-    throw new Error("Datetime, agent, and customer are required");
+  if (!input.datetime || !input.customerId) {
+    throw new Error("Datetime and customer are required");
   }
   const id = input.id || uid();
+  let prev: Record<string, unknown> | null = null;
+  if (input.id && (input.source == null || input.ratingScale == null)) {
+    const cached = mappedCache?.data.calls.find((c) => c.id === id);
+    if (cached) prev = cached as unknown as Record<string, unknown>;
+    else {
+      prev = await rtdbFetch<Record<string, unknown> | null>(
+        `/calls/${encodeURIComponent(id)}.json`,
+      );
+    }
+  }
   const rating =
     input.rating == null || (input.rating as unknown) === ""
       ? null
       : Number(input.rating);
+  const prevScale =
+    prev?.ratingScale === 5 || prev?.ratingScale === 10
+      ? (prev.ratingScale as 5 | 10)
+      : undefined;
   const row = {
     id,
     datetime: input.datetime,
-    agentId: input.agentId,
+    agentId: input.agentId || "",
     customerId: input.customerId,
     clientId: input.clientId || null,
     type: input.type || "Inbound",
     duration: Number(input.duration) || 0,
     outcome: input.outcome || "Resolved",
     rating,
+    ratingScale:
+      rating == null
+        ? null
+        : input.ratingScale === 5 && rating <= 5
+          ? 5
+          : input.ratingScale === 10
+            ? 10
+            : prevScale === 5 && rating <= 5
+              ? 5
+              : 10,
     notes: (input.notes || "").trim(),
+    followUpAt: input.followUpAt ? String(input.followUpAt).slice(0, 10) : null,
+    source:
+      prev?.source === "telecom" || input.source === "telecom"
+        ? "telecom"
+        : "manual",
   };
   await putItem("calls", id, row);
   return mapCall(row);
@@ -464,9 +524,10 @@ export async function firebaseUpsertMessage(input: {
   body: string;
   status?: string;
   notes?: string;
+  followUpAt?: string | null;
 }): Promise<Message> {
-  if (!input.datetime || !input.agentId || !input.customerId) {
-    throw new Error("Datetime, agent, and customer are required");
+  if (!input.datetime || !input.customerId) {
+    throw new Error("Datetime and customer are required");
   }
   const body = (input.body || "").trim();
   if (!body) throw new Error("Message body is required");
@@ -474,7 +535,7 @@ export async function firebaseUpsertMessage(input: {
   const row = {
     id,
     datetime: input.datetime,
-    agentId: input.agentId,
+    agentId: input.agentId || "",
     customerId: input.customerId,
     clientId: input.clientId || null,
     channel: input.channel || "SMS",
@@ -483,6 +544,7 @@ export async function firebaseUpsertMessage(input: {
     body,
     status: input.status || "Open",
     notes: (input.notes || "").trim(),
+    followUpAt: input.followUpAt ? String(input.followUpAt).slice(0, 10) : null,
   };
   await putItem("messages", id, row);
   return mapMessage(row);
@@ -490,4 +552,51 @@ export async function firebaseUpsertMessage(input: {
 
 export async function firebaseDeleteMessage(id: string): Promise<void> {
   await deleteItem("messages", id);
+}
+
+export async function firebaseMergeCustomers(
+  keepId: string,
+  dropId: string,
+): Promise<void> {
+  if (!keepId || !dropId || keepId === dropId) {
+    throw new Error("Pick two different customers to merge");
+  }
+  const data = await firebaseLoadAll();
+  const keep = data.customers.find((c) => c.id === keepId);
+  const drop = data.customers.find((c) => c.id === dropId);
+  if (!keep || !drop) throw new Error("Customer not found");
+  for (const call of data.calls.filter((c) => c.customerId === dropId)) {
+    await firebaseUpsertCall({
+      id: call.id,
+      datetime: call.datetime,
+      agentId: call.agentId,
+      customerId: keepId,
+      clientId: call.clientId || keep.clientId,
+      type: call.type,
+      duration: call.duration,
+      outcome: call.outcome,
+      rating: call.rating,
+      ratingScale: call.ratingScale,
+      notes: call.notes,
+      followUpAt: call.followUpAt,
+      source: call.source === "telecom" ? "telecom" : "manual",
+    });
+  }
+  for (const msg of (data.messages || []).filter((m) => m.customerId === dropId)) {
+    await firebaseUpsertMessage({
+      id: msg.id,
+      datetime: msg.datetime,
+      agentId: msg.agentId,
+      customerId: keepId,
+      clientId: msg.clientId || keep.clientId,
+      channel: msg.channel,
+      direction: msg.direction,
+      subject: msg.subject,
+      body: msg.body,
+      status: msg.status,
+      notes: msg.notes,
+      followUpAt: msg.followUpAt,
+    });
+  }
+  await firebaseDeleteCustomer(dropId);
 }

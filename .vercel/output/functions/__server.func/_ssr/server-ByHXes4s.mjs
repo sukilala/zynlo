@@ -1,5 +1,5 @@
-import { n as createServerFn, t as TSS_SERVER_FUNCTION } from "./ssr.mjs";
-//#region node_modules/.nitro/vite/services/ssr/assets/server-b6LaWcuG.js
+import { n as TSS_SERVER_FUNCTION, t as createServerFn } from "./ssr.mjs";
+//#region node_modules/.nitro/vite/services/ssr/assets/server-ByHXes4s.js
 var createServerRpc = (serverFnMeta, splitImportFn) => {
 	const url = "/_serverFn/" + serverFnMeta.id;
 	return Object.assign(splitImportFn, {
@@ -77,10 +77,17 @@ function needsMigration(raw) {
 }
 var migratePromise = null;
 /** One-time (per process) convert array collections → maps by id. */
+async function loadCollections() {
+	const entries = await Promise.all(COLLECTIONS.map(async (col) => {
+		return [col, await rtdbFetch(`/${col}.json`)];
+	}));
+	const root = {};
+	for (const [col, raw] of entries) root[col] = raw;
+	return root;
+}
 async function ensureFirebaseMaps() {
 	if (!migratePromise) migratePromise = (async () => {
-		const root = await rtdbFetch("/.json");
-		if (!root) return;
+		const root = await loadCollections();
 		const updates = {};
 		for (const col of COLLECTIONS) {
 			const raw = root[col];
@@ -136,18 +143,21 @@ function mapClient(r) {
 		notes: String(r.notes || "")
 	};
 }
-function mapCall(r) {
+function mapCall(r, clientIdOverride) {
 	return {
 		id: String(r.id),
 		datetime: String(r.datetime || ""),
 		agentId: String(r.agentId || ""),
 		customerId: String(r.customerId || ""),
-		clientId: r.clientId ? String(r.clientId) : null,
+		clientId: clientIdOverride !== void 0 ? clientIdOverride : r.clientId ? String(r.clientId) : null,
 		type: r.type || "Inbound",
 		duration: Number(r.duration) || 0,
 		outcome: r.outcome || "Resolved",
 		rating: r.rating == null || r.rating === "" ? null : Number(r.rating),
-		notes: String(r.notes || "")
+		ratingScale: r.ratingScale === 10 || Number(r.rating) > 5 ? 10 : r.rating == null || r.rating === "" ? void 0 : 5,
+		notes: String(r.notes || ""),
+		followUpAt: r.followUpAt ? String(r.followUpAt).slice(0, 10) : null,
+		source: r.source === "telecom" ? "telecom" : "manual"
 	};
 }
 function mapMessage(r) {
@@ -162,7 +172,8 @@ function mapMessage(r) {
 		subject: String(r.subject || ""),
 		body: String(r.body || ""),
 		status: r.status || "Open",
-		notes: String(r.notes || "")
+		notes: String(r.notes || ""),
+		followUpAt: r.followUpAt ? String(r.followUpAt).slice(0, 10) : null
 	};
 }
 function valuesSorted(map, by) {
@@ -170,14 +181,34 @@ function valuesSorted(map, by) {
 	if (by === "name") return list.sort((a, b) => String(a.name || "").localeCompare(String(b.name || "")));
 	return list.sort((a, b) => new Date(String(b.datetime || 0)).getTime() - new Date(String(a.datetime || 0)).getTime());
 }
+/** Normalize client/company names for fuzzy matching (CC Express variants). */
+function normName(s) {
+	return (s || "").toLowerCase().replace(/[^a-z0-9]/g, "");
+}
+function buildClientLookup(clients) {
+	const m = /* @__PURE__ */ new Map();
+	for (const c of clients) m.set(normName(c.name), c.id);
+	return m;
+}
+function resolveClientId(lookup, clientId, legacyClientName) {
+	if (clientId) return String(clientId);
+	if (legacyClientName) {
+		const id = lookup.get(normName(String(legacyClientName)));
+		if (id) return id;
+	}
+	return null;
+}
 async function firebaseLoadAll() {
 	await ensureFirebaseMaps();
-	const root = await rtdbFetch("/.json") || {};
+	const root = await loadCollections();
+	const agents = valuesSorted(toIdMap(root.agents), "name").map(mapAgent);
+	const clients = valuesSorted(toIdMap(root.clients), "name").map(mapClient);
+	const clientLookup = buildClientLookup(clients);
 	return {
-		agents: valuesSorted(toIdMap(root.agents), "name").map(mapAgent),
+		agents,
 		customers: valuesSorted(toIdMap(root.customers), "name").map(mapCustomer),
-		clients: valuesSorted(toIdMap(root.clients), "name").map(mapClient),
-		calls: valuesSorted(toIdMap(root.calls), "datetime").map(mapCall),
+		clients,
+		calls: valuesSorted(toIdMap(root.calls), "datetime").map((r) => mapCall(r, resolveClientId(clientLookup, r.clientId, r.client))),
 		messages: valuesSorted(toIdMap(root.messages), "datetime").map(mapMessage)
 	};
 }
@@ -211,7 +242,12 @@ async function firebaseUpsertAgent(input) {
 	return mapAgent(row);
 }
 async function firebaseDeleteAgent(id) {
-	await deleteItem("agents", id);
+	const data = await firebaseLoadAll();
+	await Promise.all([
+		deleteItem("agents", id),
+		...data.calls.filter((c) => c.agentId === id).map((c) => deleteItem("calls", c.id)),
+		...data.messages.filter((m) => m.agentId === id).map((m) => deleteItem("messages", m.id))
+	]);
 }
 async function firebaseUpsertCustomer(input) {
 	const name = input.name.trim();
@@ -231,7 +267,12 @@ async function firebaseUpsertCustomer(input) {
 	return mapCustomer(row);
 }
 async function firebaseDeleteCustomer(id) {
-	await deleteItem("customers", id);
+	const data = await firebaseLoadAll();
+	await Promise.all([
+		deleteItem("customers", id),
+		...data.calls.filter((c) => c.customerId === id).map((c) => deleteItem("calls", c.id)),
+		...data.messages.filter((m) => m.customerId === id).map((m) => deleteItem("messages", m.id))
+	]);
 }
 async function firebaseUpsertClient(input) {
 	const name = input.name.trim();
@@ -268,7 +309,10 @@ async function firebaseUpsertCall(input) {
 		duration: Number(input.duration) || 0,
 		outcome: input.outcome || "Resolved",
 		rating,
-		notes: (input.notes || "").trim()
+		ratingScale: rating == null ? null : input.ratingScale === 5 && rating <= 5 ? 5 : 10,
+		notes: (input.notes || "").trim(),
+		followUpAt: input.followUpAt ? String(input.followUpAt).slice(0, 10) : null,
+		source: input.source === "telecom" ? "telecom" : "manual"
 	};
 	await putItem("calls", id, row);
 	return mapCall(row);
@@ -292,13 +336,49 @@ async function firebaseUpsertMessage(input) {
 		subject: (input.subject || "").trim(),
 		body,
 		status: input.status || "Open",
-		notes: (input.notes || "").trim()
+		notes: (input.notes || "").trim(),
+		followUpAt: input.followUpAt ? String(input.followUpAt).slice(0, 10) : null
 	};
 	await putItem("messages", id, row);
 	return mapMessage(row);
 }
 async function firebaseDeleteMessage(id) {
 	await deleteItem("messages", id);
+}
+async function firebaseMergeCustomers(keepId, dropId) {
+	if (!keepId || !dropId || keepId === dropId) throw new Error("Pick two different customers to merge");
+	const data = await firebaseLoadAll();
+	const keep = data.customers.find((c) => c.id === keepId);
+	const drop = data.customers.find((c) => c.id === dropId);
+	if (!keep || !drop) throw new Error("Customer not found");
+	for (const call of data.calls.filter((c) => c.customerId === dropId)) await firebaseUpsertCall({
+		id: call.id,
+		datetime: call.datetime,
+		agentId: call.agentId,
+		customerId: keepId,
+		clientId: call.clientId || keep.clientId,
+		type: call.type,
+		duration: call.duration,
+		outcome: call.outcome,
+		rating: call.rating,
+		notes: call.notes,
+		followUpAt: call.followUpAt
+	});
+	for (const msg of (data.messages || []).filter((m) => m.customerId === dropId)) await firebaseUpsertMessage({
+		id: msg.id,
+		datetime: msg.datetime,
+		agentId: msg.agentId,
+		customerId: keepId,
+		clientId: msg.clientId || keep.clientId,
+		channel: msg.channel,
+		direction: msg.direction,
+		subject: msg.subject,
+		body: msg.body,
+		status: msg.status,
+		notes: msg.notes,
+		followUpAt: msg.followUpAt
+	});
+	await firebaseDeleteCustomer(dropId);
 }
 var getAllData_createServerFn_handler = createServerRpc({
 	id: "7a0b35f97bc22a1926b37460e302eefd4d59c949892cf5d551f57fe0e0cc6c99",
@@ -391,5 +471,14 @@ var deleteMessage = createServerFn({ method: "POST" }).validator((d) => d).handl
 	await firebaseDeleteMessage(data.id);
 	return { ok: true };
 });
+var mergeCustomers_createServerFn_handler = createServerRpc({
+	id: "b85afd5b59caa1a157b6795673bfc83fa08b301d46b0f8f0a6fdb163d0eb8521",
+	name: "mergeCustomers",
+	filename: "src/lib/zynlo/server.ts"
+}, (opts) => mergeCustomers.__executeServer(opts));
+var mergeCustomers = createServerFn({ method: "POST" }).validator((d) => d).handler(mergeCustomers_createServerFn_handler, async ({ data }) => {
+	await firebaseMergeCustomers(data.keepId, data.dropId);
+	return { ok: true };
+});
 //#endregion
-export { deleteAgent_createServerFn_handler, deleteCall_createServerFn_handler, deleteClient_createServerFn_handler, deleteCustomer_createServerFn_handler, deleteMessage_createServerFn_handler, getAllData_createServerFn_handler, getStorageMode_createServerFn_handler, saveAgent_createServerFn_handler, saveCall_createServerFn_handler, saveClient_createServerFn_handler, saveCustomer_createServerFn_handler, saveMessage_createServerFn_handler };
+export { deleteAgent_createServerFn_handler, deleteCall_createServerFn_handler, deleteClient_createServerFn_handler, deleteCustomer_createServerFn_handler, deleteMessage_createServerFn_handler, getAllData_createServerFn_handler, getStorageMode_createServerFn_handler, mergeCustomers_createServerFn_handler, saveAgent_createServerFn_handler, saveCall_createServerFn_handler, saveClient_createServerFn_handler, saveCustomer_createServerFn_handler, saveMessage_createServerFn_handler };

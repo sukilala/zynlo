@@ -1,9 +1,8 @@
-import { c as HeadContent, d as Outlet, h as require_jsx_runtime, m as createRootRoute, s as Scripts, u as createRouter } from "../_libs/@tanstack/react-router+[...].mjs";
-import { t as Route$1 } from "./routes-CQ_Ekgih.mjs";
-//#region node_modules/.nitro/vite/services/ssr/assets/router-BXH1-OSC.js
+import { c as HeadContent, d as Outlet, f as lazyRouteComponent, h as require_jsx_runtime, m as createRootRoute, p as createFileRoute, s as Scripts, u as createRouter } from "../_libs/@tanstack/react-router+[...].mjs";
+//#region node_modules/.nitro/vite/services/ssr/assets/router-C69GP5OE.js
 var import_jsx_runtime = require_jsx_runtime();
-var styles_default = "/assets/styles-D_8xbXu1.css";
-var Route = createRootRoute({
+var styles_default = "/assets/styles-C5hoPPb5.css";
+var Route$1 = createRootRoute({
 	head: () => ({
 		meta: [
 			{ charSet: "utf-8" },
@@ -52,12 +51,13 @@ function RootDocument({ children }) {
 		children: [/* @__PURE__ */ (0, import_jsx_runtime.jsx)("head", { children: /* @__PURE__ */ (0, import_jsx_runtime.jsx)(HeadContent, {}) }), /* @__PURE__ */ (0, import_jsx_runtime.jsxs)("body", { children: [children, /* @__PURE__ */ (0, import_jsx_runtime.jsx)(Scripts, {})] })]
 	});
 }
-var rootRouteChildren = { IndexRoute: Route$1.update({
+var $$splitComponentImporter = () => import("./routes-BOUeZNBV.mjs");
+var rootRouteChildren = { IndexRoute: createFileRoute("/")({ component: lazyRouteComponent($$splitComponentImporter, "component") }).update({
 	id: "/",
 	path: "/",
-	getParentRoute: () => Route
+	getParentRoute: () => Route$1
 }) };
-var routeTree = Route._addFileChildren(rootRouteChildren)._addFileTypes();
+var routeTree = Route$1._addFileChildren(rootRouteChildren)._addFileTypes();
 function getRouter() {
 	return createRouter({
 		routeTree,

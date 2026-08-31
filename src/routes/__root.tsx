@@ -22,7 +22,7 @@ export const Route = createRootRoute({
         content:
           "Zynlo call center operations.",
       },
-      { name: "theme-color", content: "#a743ff" },
+      { name: "theme-color", content: "#0f0818" },
     ],
     links: [
       { rel: "icon", type: "image/png", href: "/favicon-32.png" },
@@ -47,7 +47,7 @@ function RootComponent() {
 
 function RootDocument({ children }: { children: ReactNode }) {
   return (
-    <html lang="en">
+    <html lang="en" className="dark">
       <head>
         <HeadContent />
       </head>
