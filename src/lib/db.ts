@@ -1,3 +1,5 @@
+import { pendingMigrations } from "../../scripts/migration-plan.mjs";
+
 /** Which database backend is active. */
 export type DbSource = "neon" | "pglite";
 
@@ -15,22 +17,6 @@ const databaseUrl =
  * included. Swap in Neon later by just setting `DATABASE_URL`; no code changes.
  */
 export const dbSource: DbSource = databaseUrl ? "neon" : "pglite";
-
-/** True when a real cloud Postgres (Neon) is configured. */
-export const isCloudDatabase = dbSource === "neon";
-
-export function storageLabel(): string {
-  return dbSource === "neon"
-    ? "Cloud Postgres (Neon)"
-    : "Preview storage (local durable)";
-}
-
-if (typeof process !== "undefined" && process.env.VERCEL && !databaseUrl) {
-  console.warn(
-    "[db] VERCEL=1 but DATABASE_URL is unset — falling back to PGLite. " +
-      "Cloud persistence requires the platform-injected Neon DATABASE_URL.",
-  );
-}
 
 /**
  * Minimal shared SQL surface, satisfied by both Neon and PGLite. Both the
@@ -99,70 +85,15 @@ function toSql(run: Run): Sql {
   return sql;
 }
 
-async function applyNeonMigrations(pool: import("pg").Pool): Promise<void> {
-  const client = await pool.connect();
-  try {
-    await client.query(
-      "CREATE TABLE IF NOT EXISTS _migrations (name TEXT PRIMARY KEY, applied_at TIMESTAMPTZ NOT NULL DEFAULT now())",
-    );
-    const applied = new Set(
-      (await client.query("SELECT name FROM _migrations")).rows.map(
-        (r: { name: string }) => r.name,
-      ),
-    );
-    const { readdir, readFile } = await import("node:fs/promises");
-    const { join } = await import("node:path");
-    const dir = join(process.cwd(), "migrations");
-    let files: string[] = [];
-    try {
-      files = (await readdir(dir)).filter((f) => f.endsWith(".sql")).sort();
-    } catch {
-      return;
-    }
-    for (const name of files) {
-      if (applied.has(name)) continue;
-      const text = await readFile(join(dir, name), "utf8");
-      await client.query("BEGIN");
-      try {
-        await client.query(text);
-        await client.query("INSERT INTO _migrations (name) VALUES ($1)", [name]);
-        await client.query("COMMIT");
-        console.log("[db] Neon migration applied:", name);
-      } catch (err) {
-        await client.query("ROLLBACK");
-        throw err;
-      }
-    }
-  } finally {
-    client.release();
-  }
-}
-
 function createNeonSql(): Promise<Sql> {
   globalRef.__pgSqlPromise__ ??= (async () => {
-    // Neon serverless Postgres via node-postgres. One pool per warm instance.
+    // Regular Postgres driver: node-postgres (`pg`) — works directly with Neon's
+    // pooled endpoint. One pool per process; warm serverless instances reuse it.
     const { Pool, types } = await import("pg");
     types.setTypeParser(OID_INT8, Number);
     types.setTypeParser(OID_DATE, identity);
     types.setTypeParser(OID_INTERVAL, identity);
-
-    // Neon requires SSL; pooled endpoints work best with a small pool.
-    const pool = new Pool({
-      connectionString: databaseUrl,
-      max: 5,
-      idleTimeoutMillis: 10_000,
-      connectionTimeoutMillis: 15_000,
-      ssl:
-        databaseUrl!.includes("sslmode=disable")
-          ? undefined
-          : { rejectUnauthorized: false },
-    });
-
-    // Verify cloud connection and apply any pending migrations at first use.
-    await pool.query("select 1");
-    console.log("[db] Connected to Neon cloud Postgres");
-    await applyNeonMigrations(pool);
-
+    const pool = new Pool({ connectionString: databaseUrl });
     return toSql(async <T>(text: string, params: unknown[]) => {
       const res = await pool.query(text, params);
       return res.rows as T[];
@@ -174,86 +105,13 @@ function createNeonSql(): Promise<Sql> {
   return globalRef.__pgSqlPromise__;
 }
 
-/**
- * Load PGlite WASM + data bundles from the installed package path.
- * Nitro/Vercel rewrites `import.meta.url` so PGlite's default relative
- * `./pglite.data` lookup becomes `/var/task/_libs/pglite.data` (ENOENT).
- * Passing fsBundle + precompiled wasm modules skips that path entirely.
- */
-async function loadPgliteBundles(): Promise<{
-  fsBundle: Blob;
-  pgliteWasmModule: WebAssembly.Module;
-  initdbWasmModule: WebAssembly.Module;
-}> {
-  const { createRequire } = await import("node:module");
-  const { readFileSync, existsSync } = await import("node:fs");
-  const { dirname, join } = await import("node:path");
-
-  const candidates: string[] = [];
-  try {
-    // Resolve the package entry (exports don't expose package.json), then use
-    // its directory as the dist folder containing pglite.data / .wasm.
-    const req = createRequire(import.meta.url);
-    candidates.push(dirname(req.resolve("@electric-sql/pglite")));
-  } catch {
-    // ignore — fall through to cwd paths
-  }
-  candidates.push(
-    // Vercel/Nitro function: we copy binaries here at build time
-    join(process.cwd(), "_libs"),
-    join(process.cwd(), "node_modules/@electric-sql/pglite/dist"),
-    join(process.cwd(), "../node_modules/@electric-sql/pglite/dist"),
-    join(process.cwd(), "server/node_modules/@electric-sql/pglite/dist"),
-  );
-
-  let distDir: string | undefined;
-  for (const dir of candidates) {
-    if (
-      existsSync(join(dir, "pglite.data")) &&
-      existsSync(join(dir, "pglite.wasm"))
-    ) {
-      distDir = dir;
-      break;
-    }
-  }
-  if (!distDir) {
-    throw new Error(
-      "PGlite assets not found (pglite.data / pglite.wasm). Searched: " +
-        candidates.join(", "),
-    );
-  }
-
-  const dataBuf = readFileSync(join(distDir, "pglite.data"));
-  const wasmBuf = readFileSync(join(distDir, "pglite.wasm"));
-  const initdbPath = join(distDir, "initdb.wasm");
-  const initdbBuf = existsSync(initdbPath)
-    ? readFileSync(initdbPath)
-    : undefined;
-
-  const fsBundle = new Blob([new Uint8Array(dataBuf)]);
-  const pgliteWasmModule = await WebAssembly.compile(new Uint8Array(wasmBuf));
-  const initdbWasmModule = initdbBuf
-    ? await WebAssembly.compile(new Uint8Array(initdbBuf))
-    : await WebAssembly.compile(new Uint8Array(wasmBuf));
-
-  return { fsBundle, pgliteWasmModule, initdbWasmModule };
-}
-
-/**
- * PGlite runs in-memory under Vite SSR (NodeFS init is unreliable in the
- * bundler). Durable storage for app data is handled by
- * `src/lib/zynlo/persist.ts` which snapshots to `data/zynlo-snapshot.json`
- * after every mutation and restores on boot when the DB is empty.
- */
 async function createPgliteSql(): Promise<Sql> {
+  // Embedded Postgres, imported on demand so it never loads on the Neon path.
+  // One in-memory instance per process, shared across HMR module instances, so
+  // data survives source edits (it resets on dev-server restart).
   globalRef.__pgliteInstance__ ??= (async () => {
     const { PGlite } = await import("@electric-sql/pglite");
-    const bundles = await loadPgliteBundles();
     const pg = new PGlite({
-      dataDir: "memory://",
-      fsBundle: bundles.fsBundle,
-      pgliteWasmModule: bundles.pgliteWasmModule,
-      initdbWasmModule: bundles.initdbWasmModule,
       parsers: {
         [OID_INT8]: Number,
         [OID_DATE]: identity,
@@ -271,12 +129,13 @@ async function createPgliteSql(): Promise<Sql> {
   });
   const pg = await globalRef.__pgliteInstance__;
 
-
   // Apply migrations/ (the single schema source) so preview matches production.
   // SQL is inlined by the bundler via import.meta.glob (no runtime fs); applied
-  // files are tracked in _migrations. Runs once per module instance — so an HMR
-  // reload after adding a migration file applies it live — with passes
-  // serialized on a global chain so concurrent callers never double-apply.
+  // files are tracked in _migrations. The glob does not descend, so the opt-in
+  // auth schema under migrations/auth/ stays out. Runs once per module instance
+  // — so an HMR reload after adding a migration file applies it live — with
+  // passes serialized on a global chain so concurrent callers never
+  // double-apply.
   const migrate = async (): Promise<void> => {
     const migrations = import.meta.glob("/migrations/*.sql", {
       query: "?raw",
@@ -286,16 +145,12 @@ async function createPgliteSql(): Promise<Sql> {
     const doneRows = await pg.query<{ name: string }>(
       "select name from _migrations",
     );
-    const done = new Set(doneRows.rows.map((r) => r.name));
-    for (const [path, text] of Object.entries(migrations).sort(([a], [b]) =>
-      a.localeCompare(b),
-    )) {
-      const name = path.split("/").pop() as string;
-      if (done.has(name)) continue;
+    const done = doneRows.rows.map((r) => r.name);
+    for (const { name, path } of pendingMigrations(Object.keys(migrations), done)) {
       // Apply + record atomically (parity with scripts/migrate.mjs) so a failed
       // statement can't leave a file half-applied but untracked.
       await pg.transaction(async (tx) => {
-        await tx.exec(text);
+        await tx.exec(migrations[path]);
         await tx.query("insert into _migrations (name) values ($1)", [name]);
       });
     }
