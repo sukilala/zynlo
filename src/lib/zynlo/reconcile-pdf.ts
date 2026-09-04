@@ -50,6 +50,7 @@ export type ReconcilePreview = {
   detectedAgentId: string;
   detectedAgentName: string;
   detectedDirection: CallType | null;
+  extraIds: string[];
 };
 
 function hhmmssToMinutes(raw: string): number {
@@ -725,6 +726,24 @@ export function buildReconcilePreviewFromRows(
     detectAgentFromFilename(filename, agents) ||
     matchAgentId(names[0] || "", agents);
   const detectedAgentName = names.join(", ");
+  const extraIds: string[] = [];
+  if (detectedAgentId) {
+    const matched = new Set(matchedIds);
+    const dates = new Set(
+      answered.map((r) => (r.datetime || "").slice(0, 10)).filter(Boolean),
+    );
+    const dir = fileDirection;
+    for (const call of data.calls) {
+      if (call.csvCounted === false) continue;
+      if (matched.has(call.id)) continue;
+      if (call.source === "telecom") continue;
+      if (call.agentId !== detectedAgentId) continue;
+      const day = (call.datetime || "").slice(0, 10);
+      if (!dates.has(day)) continue;
+      if (dir && directionOf(call.type) !== dir) continue;
+      extraIds.push(call.id);
+    }
+  }
   return {
     filename,
     answered: answered.length,
@@ -740,6 +759,7 @@ export function buildReconcilePreviewFromRows(
     detectedAgentId,
     detectedAgentName,
     detectedDirection: fileDirection,
+    extraIds,
   };
 }
 

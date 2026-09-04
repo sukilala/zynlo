@@ -219,6 +219,7 @@ function mapCall(
     notes: String(r.notes || ""),
     followUpAt: r.followUpAt ? String(r.followUpAt).slice(0, 10) : null,
     source: r.source === "telecom" ? "telecom" : "manual",
+    csvCounted: r.csvCounted === false ? false : r.csvCounted === true ? true : undefined,
   };
 }
 
@@ -454,16 +455,29 @@ export async function firebaseUpsertCall(input: {
   notes?: string;
   followUpAt?: string | null;
   source?: "manual" | "telecom";
+  csvCounted?: boolean;
 }): Promise<Call> {
   if (!input.datetime || !input.customerId) {
     throw new Error("Datetime and customer are required");
   }
   const id = input.id || uid();
   let prev: Record<string, unknown> | null = null;
-  if (input.id && (input.source == null || input.ratingScale == null)) {
+  if (input.id) {
     const cached = mappedCache?.data.calls.find((c) => c.id === id);
     if (cached) prev = cached as unknown as Record<string, unknown>;
-    else {
+    if (
+      input.csvCounted !== true &&
+      input.csvCounted !== false &&
+      prev?.csvCounted !== true &&
+      prev?.csvCounted !== false
+    ) {
+      const live = await rtdbFetch<Record<string, unknown> | null>(
+        `/calls/${encodeURIComponent(id)}.json`,
+      );
+      if (live && typeof live === "object") {
+        prev = { ...(prev || {}), ...live };
+      }
+    } else if (!prev) {
       prev = await rtdbFetch<Record<string, unknown> | null>(
         `/calls/${encodeURIComponent(id)}.json`,
       );
@@ -503,6 +517,12 @@ export async function firebaseUpsertCall(input: {
       prev?.source === "telecom" || input.source === "telecom"
         ? "telecom"
         : "manual",
+    csvCounted:
+      input.csvCounted === false || prev?.csvCounted === false
+        ? false
+        : input.csvCounted === true || prev?.csvCounted === true
+          ? true
+          : undefined,
   };
   await putItem("calls", id, row);
   return mapCall(row);
@@ -580,6 +600,7 @@ export async function firebaseMergeCustomers(
       notes: call.notes,
       followUpAt: call.followUpAt,
       source: call.source === "telecom" ? "telecom" : "manual",
+      csvCounted: call.csvCounted,
     });
   }
   for (const msg of (data.messages || []).filter((m) => m.customerId === dropId)) {

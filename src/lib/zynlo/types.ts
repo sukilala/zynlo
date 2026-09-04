@@ -75,6 +75,8 @@ export interface Call {
   followUpAt: string | null;
   /** manual = agent log. telecom = file reconcile. Never overwrite manual. */
   source?: "manual" | "telecom";
+  /** false = extra over the CSV cap. Stays in Firebase, off every total. */
+  csvCounted?: boolean;
 }
 
 /** Logged SMS / chat / email conversation touchpoint */

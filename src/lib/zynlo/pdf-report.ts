@@ -2,11 +2,14 @@ import { jsPDF } from "jspdf";
 import autoTable from "jspdf-autotable";
 import type { Agent, Call, Client, Customer, Message } from "./types";
 import {
-  callRating,
+  countsAsInbound,
+  countsAsOutbound,
+  countsInCallLog,
   formatDate,
   formatDuration,
   getFollowUpItems,
   periodQa,
+  qaScore,
   resolutionOf,
   todayStr,
 } from "./utils";
@@ -67,12 +70,13 @@ export async function downloadClientPdf(opts: {
   agentsById: Record<string, Agent>;
   customersById: Record<string, Customer>;
 }): Promise<void> {
-  const { client, contacts, calls, messages, agentsById, customersById } = opts;
+  const { client, contacts, messages, agentsById, customersById } = opts;
+  const calls = opts.calls.filter(countsInCallLog);
   const logo = await loadLogo();
   const period = periodLabel();
   const qa = periodQa(calls, 4000);
-  const inbound = calls.filter((c) => (c.type || "Inbound") === "Inbound").length;
-  const outbound = calls.filter((c) => c.type === "Outbound").length;
+  const inbound = calls.filter(countsAsInbound).length;
+  const outbound = calls.filter(countsAsOutbound).length;
   const res = resolutionOf(calls);
   const resolved = res.resolved;
   const escalated = calls.filter((c) => c.outcome === "Escalated").length;
@@ -84,8 +88,9 @@ export async function downloadClientPdf(opts: {
     calls,
     messages,
   }).length;
-  const aht = calls.length
-    ? calls.reduce((s, c) => s + (c.duration || 0), 0) / calls.length
+  const timed = calls.filter((c) => (c.duration || 0) > 0);
+  const aht = timed.length
+    ? timed.reduce((s, c) => s + (c.duration || 0), 0) / timed.length
     : 0;
   const resolution = res.percent;
   const generated = new Date().toLocaleString("en-GB", {
@@ -346,7 +351,7 @@ export async function downloadClientPdf(opts: {
             agentsById[c.agentId]?.name || "-",
             formatDuration(c.duration),
             c.outcome,
-            callRating(c) != null ? String(callRating(c)) : "-",
+            qaScore(c) != null ? String(qaScore(c)) : "-",
             (c.notes || "").slice(0, 90),
           ];
         })

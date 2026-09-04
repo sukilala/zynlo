@@ -65,6 +65,9 @@ import {
   agentMap,
   callRating,
   clientMap,
+  countsAsInbound,
+  countsAsOutbound,
+  countsInCallLog,
   customerCompanyLabel,
   customerMap,
   customerTimeline,
@@ -84,6 +87,8 @@ import {
   groupUnratedCalls,
   localDatetimeValue,
   periodQa,
+  qaEligible,
+  qaScore,
   resolutionOf,
   shortNotes,
   todayStr,
@@ -454,7 +459,8 @@ export function ZynloApp({ initial }: { initial: ZynloData }) {
 	async function applyReconcile() {
 		if (!reconcilePreview) return;
 		const fixes = reconcilePreview.directionFixes || [];
-		if (reconcilePreview.missing.length === 0 && fixes.length === 0) {
+		const extraIds = reconcilePreview.extraIds || [];
+		if (reconcilePreview.missing.length === 0 && fixes.length === 0 && extraIds.length === 0) {
 			toast("Nothing to apply");
 			return;
 		}
@@ -480,7 +486,8 @@ export function ZynloApp({ initial }: { initial: ZynloData }) {
 					ratingScale: c.ratingScale,
 					notes: c.notes,
 					followUpAt: c.followUpAt,
-					source: c.source === "telecom" ? "telecom" : "manual"
+					source: c.source === "telecom" ? "telecom" : "manual",
+					csvCounted: c.csvCounted
 				} });
 				flipped += 1;
 			});
@@ -533,7 +540,8 @@ export function ZynloApp({ initial }: { initial: ZynloData }) {
 					rating: null,
 					notes: row.did ? `Telecom reconcile. ${row.disposition}. DID ${row.did}.` : `Telecom reconcile. ${row.disposition}.`,
 					followUpAt: null,
-					source: "telecom"
+					source: "telecom",
+					csvCounted: true
 				} });
 				if (saved && saved.id) {
 					liveData.calls = [...liveData.calls, saved];
@@ -541,12 +549,39 @@ export function ZynloApp({ initial }: { initial: ZynloData }) {
 				}
 				added += 1;
 			});
+			let hidden = 0;
+			const stamp = [...new Set([...(reconcilePreview.matchedIds || []), ...extraIds])];
+			await runPool(stamp, 6, async (id) => {
+				const c = liveData.calls.find((x) => x.id === id) || live.calls.find((x) => x.id === id);
+				if (!c) return;
+				const hide = extraIds.includes(id);
+				if (!hide && c.csvCounted === true) return;
+				if (hide && c.csvCounted === false) return;
+				await saveCall({ data: {
+					id: c.id,
+					datetime: c.datetime,
+					agentId: c.agentId,
+					customerId: c.customerId,
+					clientId: c.clientId,
+					type: c.type,
+					duration: c.duration,
+					outcome: c.outcome,
+					rating: c.rating,
+					ratingScale: c.ratingScale,
+					notes: c.notes,
+					followUpAt: c.followUpAt,
+					source: c.source === "telecom" ? "telecom" : "manual",
+					csvCounted: hide ? false : true
+				} });
+				if (hide) hidden += 1;
+			});
 			void refresh();
 			setReconcilePreview(null);
 			setModal(null);
 			const bits = [];
 			if (added) bits.push(`${added} added`);
 			if (flipped) bits.push(`${flipped} updated`);
+			if (hidden) bits.push(`${hidden} extra hidden`);
 			toast(bits.join(" · ") || "Nothing to apply");
 		} catch (err) {
 			toast(err instanceof Error ? err.message : "Reconcile failed");
@@ -575,7 +610,8 @@ export function ZynloApp({ initial }: { initial: ZynloData }) {
 				ratingScale: patch.rating !== void 0 ? 10 : c.ratingScale === 10 || c.rating != null && c.rating > 5 ? 10 : c.rating == null ? void 0 : 5,
 				notes: c.notes,
 				followUpAt: patch.followUpAt !== void 0 ? patch.followUpAt : c.followUpAt,
-				source: c.source === "telecom" ? "telecom" : "manual"
+				source: c.source === "telecom" ? "telecom" : "manual",
+				csvCounted: c.csvCounted
 			} });
 			void refresh();
 			toast("Updated");
@@ -615,22 +651,22 @@ export function ZynloApp({ initial }: { initial: ZynloData }) {
 	const kpis = useMemo(() => {
 		const today = todayStr();
 		const yest = yesterdayStr();
-		const todayCalls = data.calls.filter((c) => c.datetime?.startsWith(today));
-		const yestCalls = data.calls.filter((c) => c.datetime?.startsWith(yest));
+		const todayCalls = data.calls.filter((c) => countsInCallLog(c) && c.datetime?.startsWith(today));
+		const yestCalls = data.calls.filter((c) => countsInCallLog(c) && c.datetime?.startsWith(yest));
 		const todayMsgs = messages.filter((m) => m.datetime?.startsWith(today));
 		const resolution = resolutionOf(todayCalls).percent;
 		const timed = todayCalls.filter((c) => (c.duration || 0) > 0);
 		const aht = timed.length ? timed.reduce((s, c) => s + (c.duration || 0), 0) / timed.length : 0;
-		const allRated = data.calls.map(callRating).filter((n) => n != null);
+		const allRated = data.calls.filter(qaEligible).map(callRating).filter((n) => n != null);
 		const allCsat = allRated.length ? allRated.reduce((s, n) => s + n, 0) / allRated.length : 0;
 		const period = periodQa(data.calls, 14);
 		const csat = period.avg;
 		period.rated;
-		const todayRatedScores = todayCalls.map(callRating).filter((n) => n != null);
+		const todayRatedScores = todayCalls.filter(qaEligible).map(callRating).filter((n) => n != null);
 		const todayCsat = todayRatedScores.length ? todayRatedScores.reduce((s, n) => s + n, 0) / todayRatedScores.length : 0;
 		const delta = todayCalls.length - yestCalls.length;
-		const inboundToday = todayCalls.filter((c) => c.type !== "Outbound").length;
-		const outboundToday = todayCalls.filter((c) => c.type === "Outbound").length;
+		const inboundToday = todayCalls.filter(countsAsInbound).length;
+		const outboundToday = todayCalls.filter(countsAsOutbound).length;
 		const callbackToday = todayCalls.filter((c) => c.type === "Callback").length;
 		return {
 			totalToday: todayCalls.length,
@@ -653,22 +689,24 @@ export function ZynloApp({ initial }: { initial: ZynloData }) {
 	const callsByDay = useMemo(() => {
 		const days = [];
 		for (let i = 13; i >= 0; i--) {
-			const d = /* @__PURE__ */ new Date();
-			d.setDate(d.getDate() - i);
-			const str = d.getFullYear() + "-" + String(d.getMonth() + 1).padStart(2, "0") + "-" + String(d.getDate()).padStart(2, "0");
+			const str = dateOffsetStr(-i);
+			const d = new Date(str + "T12:00:00");
 			days.push({
 				label: d.toLocaleDateString("en-GB", {
 					weekday: "short",
 					day: "numeric"
 				}),
-				calls: data.calls.filter((c) => c.datetime?.startsWith(str)).length
+				calls: data.calls.filter((c) => countsInCallLog(c) && c.datetime?.startsWith(str)).length
 			});
 		}
 		return days;
 	}, [data.calls]);
 	const outcomeData = useMemo(() => {
 		const map = {};
-		for (const c of data.calls) if (c.outcome) map[c.outcome] = (map[c.outcome] || 0) + 1;
+		for (const c of data.calls) {
+			if (!countsInCallLog(c) || !c.outcome) continue;
+			map[c.outcome] = (map[c.outcome] || 0) + 1;
+		}
 		const entries = Object.entries(map).map(([name, value]) => ({
 			name,
 			value
@@ -681,15 +719,14 @@ export function ZynloApp({ initial }: { initial: ZynloData }) {
 	const dailyVolume = useMemo(() => {
 		const days = [];
 		for (let i = 6; i >= 0; i--) {
-			const d = /* @__PURE__ */ new Date();
-			d.setDate(d.getDate() - i);
-			const str = d.getFullYear() + "-" + String(d.getMonth() + 1).padStart(2, "0") + "-" + String(d.getDate()).padStart(2, "0");
+			const str = dateOffsetStr(-i);
+			const d = new Date(str + "T12:00:00");
 			days.push({
 				label: d.toLocaleDateString("en-GB", {
 					weekday: "short",
 					day: "numeric"
 				}),
-				calls: data.calls.filter((c) => c.datetime?.startsWith(str)).length,
+				calls: data.calls.filter((c) => countsInCallLog(c) && c.datetime?.startsWith(str)).length,
 				messages: messages.filter((m) => m.datetime?.startsWith(str)).length
 			});
 		}
@@ -698,10 +735,9 @@ export function ZynloApp({ initial }: { initial: ZynloData }) {
 	const ahtTrend = useMemo(() => {
 		const days = [];
 		for (let i = 13; i >= 0; i--) {
-			const d = /* @__PURE__ */ new Date();
-			d.setDate(d.getDate() - i);
-			const str = d.getFullYear() + "-" + String(d.getMonth() + 1).padStart(2, "0") + "-" + String(d.getDate()).padStart(2, "0");
-			const dayCalls = data.calls.filter((c) => c.datetime?.startsWith(str) && (c.duration || 0) > 0);
+			const str = dateOffsetStr(-i);
+			const d = new Date(str + "T12:00:00");
+			const dayCalls = data.calls.filter((c) => countsInCallLog(c) && c.datetime?.startsWith(str) && (c.duration || 0) > 0);
 			const avg = dayCalls.length ? dayCalls.reduce((s, c) => s + (c.duration || 0), 0) / dayCalls.length : 0;
 			days.push({
 				label: d.toLocaleDateString("en-GB", {
@@ -725,7 +761,7 @@ export function ZynloApp({ initial }: { initial: ZynloData }) {
 		}).sort((a, b) => b.score - a.score);
 	}, [data]);
 	const filteredCalls = useMemo(() => {
-		let list = [...data.calls];
+		let list = data.calls.filter(countsInCallLog);
 		const q = callSearch.toLowerCase().trim();
 		if (q) list = list.filter((c) => {
 			const a = agentsById[c.agentId];
@@ -934,7 +970,8 @@ export function ZynloApp({ initial }: { initial: ZynloData }) {
 				ratingScale: callForm.rating ? 10 : void 0,
 				notes: callForm.notes,
 				followUpAt: callForm.outcome === "Follow-up" || callForm.outcome === "Escalated" ? callForm.followUpAt || dateOffsetStr(1) : null,
-				source: editId && data.calls.find((c) => c.id === editId)?.source === "telecom" ? "telecom" : "manual"
+				source: editId && data.calls.find((c) => c.id === editId)?.source === "telecom" ? "telecom" : "manual",
+				csvCounted: editId ? data.calls.find((c) => c.id === editId)?.csvCounted : void 0
 			} });
 			setWorkingAgent(callForm.agentId);
 			void refresh();
@@ -1150,7 +1187,7 @@ export function ZynloApp({ initial }: { initial: ZynloData }) {
 	}
 	function exportCsv(type, clientIdOverride) {
 		const date = (/* @__PURE__ */ new Date()).toISOString().split("T")[0];
-		if (type === "calls") downloadText("Datetime,Agent,Customer,Phone,Type,Duration,Outcome,Rating,Notes\n" + data.calls.map((c) => [
+		if (type === "calls") downloadText("Datetime,Agent,Customer,Phone,Type,Duration,Outcome,Rating,Notes\n" + data.calls.filter(countsInCallLog).map((c) => [
 			c.datetime,
 			agentsById[c.agentId]?.name || "",
 			customersById[c.customerId]?.name || "",
@@ -1158,7 +1195,7 @@ export function ZynloApp({ initial }: { initial: ZynloData }) {
 			c.type,
 			c.duration,
 			c.outcome,
-			c.rating ?? "",
+			qaScore(c) ?? "",
 			c.notes
 		].map(escapeCsv).join(",")).join("\n"), `zynlo_calls_${date}.csv`, "text/csv");
 		else if (type === "messages") downloadText("Datetime,Agent,Customer,Channel,Direction,Subject,Body,Status,Notes\n" + messages.map((m) => [
@@ -1286,8 +1323,8 @@ export function ZynloApp({ initial }: { initial: ZynloData }) {
 					periodCalls.filter((c) => c.outcome === "Resolved").length,
 					periodCalls.filter((c) => c.outcome === "Escalated").length,
 					periodCalls.filter((c) => c.outcome === "Follow-up").length,
-					periodCalls.filter((c) => (c.type || "Inbound") === "Inbound").length,
-					periodCalls.filter((c) => c.type === "Outbound").length,
+					periodCalls.filter(countsAsInbound).length,
+					periodCalls.filter(countsAsOutbound).length,
 					getFollowUpItems({
 						...data,
 						calls: periodCalls,
@@ -1417,7 +1454,7 @@ export function ZynloApp({ initial }: { initial: ZynloData }) {
 		if (id !== "customers") setSelectedCustomerId(null);
 	};
 	const todayKey = todayStr();
-	const todayCallsSorted = data.calls.filter((c) => c.datetime?.startsWith(todayKey)).slice().sort((a, b) => new Date(b.datetime).getTime() - new Date(a.datetime).getTime());
+	const todayCallsSorted = data.calls.filter((c) => countsInCallLog(c) && c.datetime?.startsWith(todayKey)).slice().sort((a, b) => new Date(b.datetime).getTime() - new Date(a.datetime).getTime());
 	todayCallsSorted.filter((c) => (c.type || "Inbound") === "Inbound");
 	todayCallsSorted.filter((c) => c.type === "Outbound");
 	todayCallsSorted.filter((c) => c.type === "Callback");
@@ -1820,7 +1857,7 @@ export function ZynloApp({ initial }: { initial: ZynloData }) {
 								}, t))]
 							})
 						] }),
-						/* @__PURE__ */ jsx(Card, { children: data.calls.length === 0 ? /* @__PURE__ */ jsx(EmptyState, {
+						/* @__PURE__ */ jsx(Card, { children: data.calls.filter(countsInCallLog).length === 0 ? /* @__PURE__ */ jsx(EmptyState, {
 							icon: /* @__PURE__ */ jsx(Phone, { className: "h-12 w-12" }),
 							title: "No calls yet",
 							description: "Log your first call to get started."
@@ -3998,7 +4035,7 @@ export function ZynloApp({ initial }: { initial: ZynloData }) {
 					children: "Close"
 				}), /* @__PURE__ */ jsx(Btn, {
 					onClick: () => void applyReconcile(),
-					disabled: busy || !reconcilePreview || reconcilePreview.missing.length === 0 && !(reconcilePreview.directionFixes || []).length,
+					disabled: busy || !reconcilePreview || reconcilePreview.missing.length === 0 && !(reconcilePreview.directionFixes || []).length && !(reconcilePreview.extraIds || []).length,
 					children: busy ? "Saving" : [reconcilePreview?.missing.length ? `Add ${reconcilePreview.missing.length}` : "", (reconcilePreview?.directionFixes || []).length ? `Update ${(reconcilePreview?.directionFixes || []).length}` : ""].filter(Boolean).join(" · ") || "Apply"
 				})] }),
 				children: /* @__PURE__ */ jsxs("div", {
@@ -4652,7 +4689,7 @@ function CallsTable({ calls, agents, customers, onEdit, onDelete, compact }) {
 						}),
 						/* @__PURE__ */ jsx("td", {
 							className: "px-4 py-3",
-							children: /* @__PURE__ */ jsx(Stars, { rating: callRating(c) })
+							children: /* @__PURE__ */ jsx(Stars, { rating: qaScore(c) })
 						}),
 						/* @__PURE__ */ jsx("td", {
 							className: "max-w-[180px] truncate px-4 py-3 text-xs text-muted",
@@ -4684,7 +4721,7 @@ function CallsTable({ calls, agents, customers, onEdit, onDelete, compact }) {
 					["Type", c.type || "Inbound"],
 					["Duration", formatDuration(c.duration)],
 					["Outcome", c.outcome],
-					["QA", callRating(c) ? `${callRating(c)}/10` : "-"],
+					["QA", qaScore(c) ? `${qaScore(c)}/10` : "-"],
 					["Notes", shortNotes(c.notes, 80)]
 				],
 				onEdit: () => onEdit(c.id),

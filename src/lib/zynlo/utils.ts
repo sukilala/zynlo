@@ -21,27 +21,25 @@ export function formatDuration(mins: number): string {
   return s > 0 ? `${m}m ${s}s` : `${m}m`;
 }
 
+const COLOMBO = "Asia/Colombo";
+
 export function todayStr(): string {
-  const d = new Date();
-  return (
-    d.getFullYear() +
-    "-" +
-    String(d.getMonth() + 1).padStart(2, "0") +
-    "-" +
-    String(d.getDate()).padStart(2, "0")
-  );
+  return new Intl.DateTimeFormat("en-CA", {
+    timeZone: COLOMBO,
+    year: "numeric",
+    month: "2-digit",
+    day: "2-digit",
+  }).format(new Date());
+}
+
+export function dateOffsetStr(days: number): string {
+  const [y, m, d] = todayStr().split("-").map(Number);
+  const dt = new Date(Date.UTC(y, m - 1, d + days));
+  return dt.toISOString().slice(0, 10);
 }
 
 export function yesterdayStr(): string {
-  const d = new Date();
-  d.setDate(d.getDate() - 1);
-  return (
-    d.getFullYear() +
-    "-" +
-    String(d.getMonth() + 1).padStart(2, "0") +
-    "-" +
-    String(d.getDate()).padStart(2, "0")
-  );
+  return dateOffsetStr(-1);
 }
 
 export function getInitials(name: string): string {
@@ -92,9 +90,19 @@ export function phoneDigits(phone: string | undefined | null): string {
 export function countsForResolution(c: {
   outcome?: string;
   source?: string | null;
+  csvCounted?: boolean | null;
 }): boolean {
+  if (c.csvCounted === false || String(c.csvCounted).toLowerCase() === "false") {
+    return false;
+  }
   if (c.source === "telecom") return false;
-  if (c.outcome === "Answered") return false;
+  if (
+    c.outcome === "Answered" ||
+    c.outcome === "No Answer" ||
+    c.outcome === "Voicemail"
+  ) {
+    return false;
+  }
   return true;
 }
 
@@ -124,6 +132,66 @@ export function callRating(c: {
   return Math.round(Math.min(10, out) * 10) / 10;
 }
 
+/** Hidden CSV extras stay in Firebase but are off the log / KPIs. */
+export function countsInCallLog(c: {
+  csvCounted?: boolean | null;
+  outcome?: string;
+}): boolean {
+  if (c.csvCounted === false || String(c.csvCounted).toLowerCase() === "false") {
+    return false;
+  }
+  if (c.outcome === "No Answer" || c.outcome === "Voicemail") return false;
+  return true;
+}
+
+/** Agent QA only. CSV/telecom inserts and hidden extras do not score. */
+export function qaEligible(c: {
+  source?: string | null;
+  outcome?: string;
+  csvCounted?: boolean | null;
+  rating?: number | string | null;
+  ratingScale?: 5 | 10 | null;
+  notes?: string | null;
+}): boolean {
+  if (!countsInCallLog(c)) return false;
+  if (c.source === "telecom") return false;
+  if (
+    c.outcome === "Answered" ||
+    c.outcome === "No Answer" ||
+    c.outcome === "Voicemail"
+  ) {
+    return false;
+  }
+  if (/^\s*telecom reconcile/i.test(c.notes || "")) return false;
+  return callRating(c) != null;
+}
+
+export function qaScore(c: {
+  source?: string | null;
+  outcome?: string;
+  csvCounted?: boolean | null;
+  rating?: number | string | null;
+  ratingScale?: 5 | 10 | null;
+}): number | null {
+  return qaEligible(c) ? callRating(c) : null;
+}
+
+export function countsAsInbound(c: {
+  type?: string;
+  csvCounted?: boolean | null;
+  outcome?: string;
+}): boolean {
+  return countsInCallLog(c) && (c.type || "Inbound") === "Inbound";
+}
+
+export function countsAsOutbound(c: {
+  type?: string;
+  csvCounted?: boolean | null;
+  outcome?: string;
+}): boolean {
+  return countsInCallLog(c) && c.type === "Outbound";
+}
+
 /**
  * Match a customer by phone. Prefer exact digit match (min 7 digits).
  */
@@ -146,7 +214,9 @@ export function findCustomerByPhone(
 }
 
 export function getAgentStats(data: ZynloData, agentId: string) {
-  const agentCalls = data.calls.filter((c) => c.agentId === agentId);
+  const agentCalls = data.calls.filter(
+    (c) => c.agentId === agentId && countsInCallLog(c),
+  );
   const agentMsgs = (data.messages || []).filter((m) => m.agentId === agentId);
   const today = todayStr();
   const todayCallsList = agentCalls.filter((c) =>
@@ -157,6 +227,7 @@ export function getAgentStats(data: ZynloData, agentId: string) {
   const resAll = resolutionOf(agentCalls);
   const resolved = resAll.resolved;
   const ratedScores = agentCalls
+    .filter(qaEligible)
     .map(callRating)
     .filter((n): n is number => n != null);
   const timedAll = agentCalls.filter((c) => (c.duration || 0) > 0);
@@ -173,6 +244,7 @@ export function getAgentStats(data: ZynloData, agentId: string) {
     ? timedToday.reduce((s, c) => s + (c.duration || 0), 0) / timedToday.length
     : 0;
   const todayRatedScores = todayCallsList
+    .filter(qaEligible)
     .map(callRating)
     .filter((n): n is number => n != null);
   const todayCsat = todayRatedScores.length
@@ -213,7 +285,7 @@ export function getAgentStats(data: ZynloData, agentId: string) {
 
 export function getCustomerStats(data: ZynloData, customerId: string) {
   const custCalls = data.calls
-    .filter((c) => c.customerId === customerId)
+    .filter((c) => c.customerId === customerId && countsInCallLog(c))
     .sort(
       (a, b) =>
         new Date(b.datetime).getTime() - new Date(a.datetime).getTime(),
@@ -245,7 +317,10 @@ export function getCustomerStats(data: ZynloData, customerId: string) {
         : 0;
     })(),
     qaScore: (() => {
-      const rated = custCalls.map(callRating).filter((n): n is number => n != null);
+      const rated = custCalls
+        .filter(qaEligible)
+        .map(callRating)
+        .filter((n): n is number => n != null);
       return rated.length
         ? rated.reduce((s, n) => s + n, 0) / rated.length
         : 0;
@@ -278,9 +353,13 @@ export function getClientStats(data: ZynloData, clientId: string) {
 
   // Calls/messages linked by clientId OR by a customer who belongs to this client
   const calls = data.calls
-    .filter(
-      (c) => c.clientId === clientId || contactIds.has(c.customerId),
-    )
+    .filter(countsInCallLog)
+    .filter((c) => {
+      if (c.clientId === clientId || contactIds.has(c.customerId)) return true;
+      const sole =
+        data.clients.length === 1 && data.clients[0]?.id === clientId;
+      return sole && !c.clientId;
+    })
     .slice()
     .sort(
       (a, b) =>
@@ -299,7 +378,10 @@ export function getClientStats(data: ZynloData, clientId: string) {
   const resolved = calls.filter((c) => c.outcome === "Resolved").length;
   const escalated = calls.filter((c) => c.outcome === "Escalated").length;
   const followUp = calls.filter((c) => c.outcome === "Follow-up").length;
-  const rated = calls.map(callRating).filter((n): n is number => n != null);
+  const rated = calls
+    .filter(qaEligible)
+    .map(callRating)
+    .filter((n): n is number => n != null);
   const timed = calls.filter((c) => (c.duration || 0) > 0);
   const avgDuration = timed.length
     ? timed.reduce((s, c) => s + (c.duration || 0), 0) / timed.length
@@ -355,15 +437,23 @@ export function getClientStats(data: ZynloData, clientId: string) {
 }
 
 /** Calls/messages within the last `days` days (for bi-weekly client reports). */
+export function filterCalendarDays<T extends { datetime: string }>(
+  items: T[],
+  days: number,
+): T[] {
+  const from = dateOffsetStr(-(Math.max(1, days) - 1));
+  const to = todayStr();
+  return items.filter((item) => {
+    const d = (item.datetime || "").slice(0, 10);
+    return d >= from && d <= to;
+  });
+}
+
 export function filterSinceDatetime<T extends { datetime: string }>(
   items: T[],
   days: number,
 ): T[] {
-  const cut = Date.now() - days * 24 * 60 * 60 * 1000;
-  return items.filter((item) => {
-    const t = new Date(item.datetime).getTime();
-    return !Number.isNaN(t) && t >= cut;
-  });
+  return filterCalendarDays(items, days);
 }
 
 export function downloadText(content: string, filename: string, mime: string) {
@@ -404,33 +494,32 @@ export function ymd(d: Date): string {
   );
 }
 
-export function dateOffsetStr(days: number): string {
-  const d = new Date();
-  d.setDate(d.getDate() + days);
-  return ymd(d);
-}
-
 export function dateOffsetFrom(dateStr: string, days: number): string {
   const d = new Date(dateStr + "T12:00:00");
   d.setDate(d.getDate() + days);
   return ymd(d);
 }
 
-/** Monday of the week, offsetWeeks=0 this week, -1 last week. */
+/** Monday of the week, offsetWeeks=0 this week, -1 last week. Colombo. */
 export function startOfWeekStr(offsetWeeks = 0): string {
-  const d = new Date();
-  const day = d.getDay();
+  const [y, m, d] = todayStr().split("-").map(Number);
+  const utc = new Date(Date.UTC(y, m - 1, d));
+  const day = utc.getUTCDay();
   const mondayOffset = day === 0 ? -6 : 1 - day;
-  d.setDate(d.getDate() + mondayOffset + offsetWeeks * 7);
-  return ymd(d);
+  utc.setUTCDate(utc.getUTCDate() + mondayOffset + offsetWeeks * 7);
+  return utc.toISOString().slice(0, 10);
 }
 
 export function rangeQa(calls: Call[], from: string, to: string) {
   const list = calls.filter((c) => {
+    if (!countsInCallLog(c)) return false;
     const d = (c.datetime || "").slice(0, 10);
     return d >= from && d <= to;
   });
-  const scores = list.map(callRating).filter((n): n is number => n != null);
+  const scores = list
+    .filter(qaEligible)
+    .map(callRating)
+    .filter((n): n is number => n != null);
   return {
     count: list.length,
     rated: scores.length,
@@ -439,13 +528,9 @@ export function rangeQa(calls: Call[], from: string, to: string) {
 }
 
 export function periodQa(calls: Call[], days: number) {
-  const list = filterSinceDatetime(calls, days);
-  const scores = list.map(callRating).filter((n): n is number => n != null);
-  return {
-    count: list.length,
-    rated: scores.length,
-    avg: scores.length ? scores.reduce((s, n) => s + n, 0) / scores.length : 0,
-  };
+  const from = dateOffsetStr(-(Math.max(1, days) - 1));
+  const to = todayStr();
+  return rangeQa(calls, from, to);
 }
 
 export type FollowUpItem = {
@@ -466,6 +551,7 @@ export function getFollowUpItems(data: ZynloData): FollowUpItem[] {
   const today = todayStr();
   const items: FollowUpItem[] = [];
   for (const c of data.calls) {
+    if (!countsInCallLog(c)) continue;
     if (c.outcome !== "Follow-up" && c.outcome !== "Escalated") continue;
     const hasDueDate = Boolean(c.followUpAt);
     const due = hasDueDate ? String(c.followUpAt).slice(0, 10) : "";
@@ -523,6 +609,7 @@ export function getActionableFollowUps(data: ZynloData): FollowUpItem[] {
 
 export function getUnratedRecent(data: ZynloData, days = 14): Call[] {
   return filterSinceDatetime(data.calls, days)
+    .filter(countsInCallLog)
     .filter((c) => c.source !== "telecom" && c.outcome !== "Answered")
     .filter((c) => callRating(c) == null)
     .sort(
@@ -582,7 +669,9 @@ export function customerTimeline(
   customerId: string,
 ): TimelineItem[] {
   const items: TimelineItem[] = [];
-  for (const c of data.calls.filter((x) => x.customerId === customerId)) {
+  for (const c of data.calls.filter(
+    (x) => x.customerId === customerId && countsInCallLog(x),
+  )) {
     items.push({
       id: c.id,
       kind: "call",
@@ -590,7 +679,7 @@ export function customerTimeline(
       title: `${c.type} · ${c.outcome}`,
       detail: formatDuration(c.duration),
       notes: c.notes || "",
-      rating: callRating(c),
+      rating: qaScore(c),
     });
   }
   for (const m of (data.messages || []).filter((x) => x.customerId === customerId)) {
