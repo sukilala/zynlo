@@ -3,8 +3,8 @@
 ## End-to-end
 
 ```text
-1. base still          image_gen / image_edit / existing PNG on #FF00FF
-2. video               image_to_video  (6s default, 10s optional)
+1. base still          imagine_text_to_image / existing PNG on #FF00FF
+2. video               imagine_image_to_video  (6s default, 10s optional)
 3. frames-raw          ffmpeg decode all frames (or fixed fps)
 4. frames-clean        magenta flood-fill + light despill → RGBA
 5. sample              even indices for N in {8,16,24,48}
@@ -86,5 +86,5 @@ Goal: roughly 0.6–1.2s visual loop for previews (not necessarily matching sour
 
 - Need hard pixel edges and fixed multi-row grids → `$generate2dsprite`
 - Map props / tilesets → `$generate2dmap` + `$generate2dsprite`
-- Non-Grok agent without `image_to_video`
+- Non-Grok agent without `imagine_image_to_video`
 - User wants production-perfect hero kit with many actions — video path is locomotion experiment first

@@ -9,7 +9,8 @@ description: >
   "sprite", "sprite sheet", "animation sheet", "pixel art character", "walk
   cycle", "attack animation", "projectile sprite", "2D game asset".
 metadata:
-  short-description: "2D sprite sheets: image_gen + magenta chroma postprocess"
+  short-description: "2D sprite sheets: imagine_text_to_image + magenta chroma postprocess"
+user-invocable: false
 ---
 
 # Generate2dsprite
@@ -28,9 +29,9 @@ code-drawn placeholders.
 | --- | --- |
 | Skill dir | `.grok/skills/generate2dsprite/` |
 | Scripts | `python3 .grok/skills/generate2dsprite/scripts/<script>.py …` |
-| Image tools | `image_gen` / `image_edit` (see **`imagine`** skill for prompt craft) |
+| Image tools | `imagine_text_to_image` / `imagine_image_to_image` (path-based; see **`imagine`** skill for prompt craft) |
 | Inspect images | `read_file` on the PNG path (not Codex view_image) |
-| Generated image path | Use the path returned by `image_gen` / `image_edit` (session `images/…`) — copy into your run dir before processing |
+| Generated image path | `imagine_text_to_image` returns a sandbox `file_path`; copy that path into your run dir before processing |
 | Python deps | Pillow + numpy (preinstalled in the image) |
 | Output home | Prefer `assets/sprites/<name>/` under `/workspace` so the app can import them |
 | Engine target | Browser: Canvas 2D, Phaser, or DOM/`<img>` — not Godot/Unity unless the user asks |
@@ -38,7 +39,7 @@ code-drawn placeholders.
 Related skills: **`imagine`** (image tool usage), **`game-asset-core`** (+
 `game-animation-frames` / `game-character-consistency` for QC and engine-ready
 defaults), **`generate2dmap`** (maps/props), **`video2dsprite`** (denser motion
-via `image_to_video`), **`building-games`** (game loop / integration).
+via `imagine_image_to_video`), **`building-games`** (game loop / integration).
 
 ## Parameters
 
@@ -70,9 +71,9 @@ Read [references/modes.md](references/modes.md) when the request is ambiguous.
 - For controllable heroes, main characters, and high-value player body actions, default attack/shoot/cast body sheets to body-only. Do not include large slash arcs, muzzle flashes, projectiles, impact bursts, detached dust, long trails, or wide detached FX in the body sheet. Generate those as separate `fx`, `projectile`, or `impact` sheets and layer them in the game.
 - Only include wide attack FX in the same raw body sheet when the target runtime explicitly supports wider per-action cells plus per-action origin/anchor metadata. Otherwise, a wide FX bbox will force the body to shrink inside the fixed cell.
 - Write the art prompt yourself. Do not default to the prompt-builder script.
-- Use built-in `image_gen` for every raw image.
-- Do not create raw sprite art with Three.js, Canvas, SVG, HTML/CSS drawing, PIL shape drawing, procedural geometry, placeholder primitives, or code-rendered screenshots. Runtime code may display finished generated assets, and scripts may make layout guides or postprocess generated images, but requested sprite art must originate from built-in `image_gen`.
-- When the user provides or implies a visual reference, use built-in image edit/reference semantics only after the reference image is visible in the conversation context. If the reference is a local file, call `read_file` on it first (image understanding); do not rely on a filesystem path in the prompt as the visual reference.
+- Use built-in `imagine_text_to_image` for every raw image.
+- Do not create raw sprite art with Three.js, Canvas, SVG, HTML/CSS drawing, PIL shape drawing, procedural geometry, placeholder primitives, or code-rendered screenshots. Runtime code may display finished generated assets, and scripts may make layout guides or postprocess generated images, but requested sprite art must originate from built-in `imagine_text_to_image`.
+- When the user provides or implies a visual reference, pass that reference's sandbox `file_path` to `imagine_image_to_image` (the tool reads the file). Also `read_file` the local reference so you can see it; a path mentioned only inside the prompt is not a visual input.
 - Do not force pixel art when the asset is a map prop for `$generate2dmap` or when the user/project requests a different style. Match the map or reference style first.
 - Use the script only as a deterministic processor: magenta cleanup, frame splitting, component filtering, scaling, alignment, QC metadata, transparent sheet export, and GIF export.
 - Do not use scripts to generate the creative image prompt. If a legacy prompt-builder command exists, treat it as historical compatibility only, not the normal skill workflow.
@@ -130,7 +131,7 @@ Choose `art_style` before writing the prompt:
 
 If a reference is involved:
 
-- Make the reference visible first. For local paths, use `read_file` (image understanding); for freshly generated references, rely on the image already shown in context.
+- Wire the reference into the call: pass its sandbox `file_path` to `imagine_image_to_image` — or the path list to `imagine_reference_to_image` for 2+ refs (generated images already have a `file_path`; local files use their sandbox path). Also `read_file` local references so you can see them.
 - State the reference role explicitly: preserve identity/style, create an animation sheet for the same subject, create an evolution/variant, or derive a matching prop/FX.
 - Preserve the stable identity markers from the reference: silhouette, palette, face/eye features, costume marks, major accessories, and material language.
 - Let only the requested action or evolution change. Do not redesign the subject unless the user asks.
@@ -146,8 +147,8 @@ Keep the strict parts:
 
 Mixed-action atlas guardrail:
 
-- Do not ask `image_gen` to generate unrelated action rows in one raw sheet, such as `row 1 idle, row 2 run, row 3 shoot, row 4 jump`, for a controllable hero or main character.
-- Do not ask `image_gen` to generate raw single-row action strips such as `1x4 idle`, `1x4 run`, `1x4 shoot`, or `1x4 jump` for a controllable hero, character, creature, NPC, enemy, summon, or animated prop.
+- Do not ask `imagine_text_to_image` to generate unrelated action rows in one raw sheet, such as `row 1 idle, row 2 run, row 3 shoot, row 4 jump`, for a controllable hero or main character.
+- Do not ask `imagine_text_to_image` to generate raw single-row action strips such as `1x4 idle`, `1x4 run`, `1x4 shoot`, or `1x4 jump` for a controllable hero, character, creature, NPC, enemy, summon, or animated prop.
 - If an engine needs a combined `4x4`, `5x5`, custom atlas, or row-strip delivery format, generate the action grids separately, process and QC them separately, then assemble the delivery atlas deterministically.
 - Exceptions are canonical directional locomotion sheets, one continuous long action sequence, prop packs, tileset-like atlases, and low-stakes compact enemy combat sheets. These still need one coherent prompt and visual QC.
 - Keep projectile, muzzle flash, impact, dust trails, and detached FX in separate sheets unless they are intentionally part of the same action silhouette and remain tightly attached.
@@ -173,7 +174,7 @@ Map prop pack guardrail:
 - Use custom wide cells for multiple similar wide objects. The grid must state explicit non-square cell dimensions and must not mix compact props with platform/terrain objects.
 - If a square prop pack fails due to edge touch or bad cropping, do not solve it by relaxing QC. Reclassify the object and regenerate with a more suitable sheet shape.
 
-If a layout guide is useful, generate one before calling built-in `image_gen`:
+If a layout guide is useful, generate one before calling built-in `imagine_text_to_image`:
 
 ```bash
 python3 .grok/skills/generate2dsprite/scripts/make_layout_guide.py \
@@ -184,7 +185,7 @@ python3 .grok/skills/generate2dsprite/scripts/make_layout_guide.py \
   --output <run-dir>/references/<rows>x<cols>-layout-guide.png
 ```
 
-Then make the guide visible in the conversation context and tell `image_gen` to use it only for invisible slot count, spacing, centering, and safe padding. The output must not reproduce guide boxes, safe-area rectangles, center marks, labels, borders, or guide background.
+Then pass the guide PNG's sandbox path to `imagine_image_to_image` — a guide that is only "visible in conversation" never reaches the image model. Also `read_file` it so you can see the geometry. Tell `imagine_image_to_image` to use it only for invisible slot count, spacing, centering, and safe padding. The output must not reproduce guide boxes, safe-area rectangles, center marks, labels, borders, or guide background.
 
 Use layout guides deliberately:
 
@@ -194,15 +195,16 @@ Use layout guides deliberately:
 
 ### 3. Generate the raw image
 
-Use built-in `image_gen`.
+Use built-in `imagine_text_to_image`.
 
 Do not use Three.js, Canvas, SVG, HTML/CSS, PIL drawing, or other code-generated art as the raw sprite source. These are acceptable only for runtime display, debug overlays, deterministic layout guides, or postprocessing already-generated images.
 
 After generation:
 
-- take the path returned by `image_gen` / `image_edit` (often under the session `images/` dir)
-- copy it into the working output folder as `raw-sheet.png` (or similar)
+- keep the returned sandbox `file_path`
+- copy that file into the working output folder as `raw-sheet.png` (or similar)
 - keep the original generated image in place
+- to run a further Imagine edit on a **postprocessed** PNG, pass that PNG's sandbox path to `imagine_image_to_image`
 
 ### 4. Postprocess locally
 

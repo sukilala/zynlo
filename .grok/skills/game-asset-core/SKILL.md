@@ -10,6 +10,7 @@ description: >
   game-ui-icons for UI and icons.
 metadata:
   short-description: "Core rules + engine-ready defaults for game assets"
+user-invocable: false
 ---
 
 # Asset Core

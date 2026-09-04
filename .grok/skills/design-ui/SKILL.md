@@ -10,6 +10,7 @@ description: >
   "polish", "landing page", "theme", "style", "redesign", "ugly", "clean up".
 metadata:
   short-description: "Polished, non-generic UI: tokens, layout, type, color, motion, anti-slop"
+user-invocable: false
 ---
 
 # Design & UI

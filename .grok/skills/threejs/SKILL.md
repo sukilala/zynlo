@@ -10,6 +10,7 @@ description: >
   "MeshStandard", "OrbitControls", "WebGLRenderer".
 metadata:
   short-description: "Three.js + TSL full API (official llms-full reference)"
+user-invocable: false
 ---
 
 # Three.js (official LLM reference)

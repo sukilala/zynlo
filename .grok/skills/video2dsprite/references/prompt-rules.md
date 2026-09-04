@@ -1,6 +1,6 @@
 # Video2dsprite prompt rules
 
-## Base still (`image_gen` / `image_edit`)
+## Base still (`imagine_text_to_image`)
 
 Required:
 
@@ -18,9 +18,9 @@ facing right, centered in frame, feet near lower third, solid flat magenta
 background #FF00FF only, no ground, no shadow, no text, crisp readable silhouette.
 ```
 
-If matching a project sprite: use `image_edit` with the existing frame as reference and only change pose/background to magenta if needed. Prefer compositing a known good frame onto magenta in code when the art already exists.
+If matching a project sprite: use `imagine_image_to_image` with the existing frame's `file_path` and only change pose/background to magenta if needed. Prefer compositing a known good frame onto magenta in code when the art already exists.
 
-## Video (`image_to_video`)
+## Video (`imagine_image_to_video`)
 
 Write **one short present-tense shot** (1–2 sentences). Constraints:
 

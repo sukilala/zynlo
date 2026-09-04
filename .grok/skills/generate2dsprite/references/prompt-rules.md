@@ -18,7 +18,7 @@ Always keep these constraints:
 - no borders or frames between cells
 - same asset identity across frames
 - same bounding box and same pixel scale across frames
-- raw sprite art must come from built-in `image_gen`, not Three.js, Canvas, SVG, HTML/CSS drawing, PIL shape drawing, procedural geometry, placeholder primitives, or code-rendered screenshots
+- raw sprite art must come from built-in `imagine_text_to_image`, not Three.js, Canvas, SVG, HTML/CSS drawing, PIL shape drawing, procedural geometry, placeholder primitives, or code-rendered screenshots
 
 ## Style Rules
 
@@ -36,8 +36,8 @@ Do not write `16-bit`, `retro JRPG`, or `chunky pixel-art` unless the user asks 
 
 Use these rules when the user attaches a reference, points to a local image, asks for consistency with an earlier generated image, or asks for an evolution/variant of an existing sprite:
 
-- Make the reference image visible to built-in `image_gen` before generation. If the reference is a local file, call `read_file` first; do not assume a path string is a visual input.
-- In the prompt, say `use the image just shown as the visual reference`.
+- Pass the reference to built-in `imagine_image_to_image` as a sandbox `file_path`, and `read_file` it so you can see it too. Do not assume a path string in the prompt is a visual input.
+- In the prompt, say `use the provided reference image as the visual reference`.
 - State what must stay fixed: silhouette family, palette, face/eyes, costume or markings, accessories, material language, and art style.
 - State what may change: pose, animation phase, action energy, size progression, evolution traits, or FX intensity.
 - For animation sheets, preserve the same character identity in every cell and only change the animation pose or effect state.
@@ -52,11 +52,7 @@ Use a layout guide when the sheet needs stronger geometric control than text alo
 - possible fit: `3x3` large idles or showcase loops when earlier generations drift in scale, spacing, or edge safety
 - risky fit: four-direction walk sheets, because guide pressure can make directional poses too centered and reduce locomotion clarity
 
-When using a layout guide, make the guide image visible first and write:
-
-```text
-Use the layout guide image just shown as a layout-only reference. Use it only to understand the rows, columns, equal invisible frame slots, centering, spacing, and safe padding. Do not reproduce the guide: no visible boxes, no safe-area rectangles, no center marks, no labels, no borders, no guide background.
-```
+When using a layout guide, pass the guide PNG's sandbox path to `imagine_image_to_image`. Use it only to understand the rows, columns, equal invisible frame slots, centering, spacing, and safe padding. Do not reproduce the guide: no visible boxes, no safe-area rectangles, no center marks, no labels, no borders, no guide background.
 
 Keep the creative prompt agent-written. The layout guide only provides geometry; it must not replace the action plan, art style, identity lock, or containment rules.
 

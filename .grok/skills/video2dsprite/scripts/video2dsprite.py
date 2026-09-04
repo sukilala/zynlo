@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Postprocess Grok image_to_video clips into dense 2D sprites.
+"""Postprocess Grok imagine_image_to_video clips into dense 2D sprites.
 
 Pipeline steps (deterministic only — no creative generation):
   extract  → ffmpeg frames from mp4
@@ -7,7 +7,7 @@ Pipeline steps (deterministic only — no creative generation):
   sample   → even-index frame sets + feet/center normalize
   process  → extract + clean + sample in one shot
 
-This skill is designed for Grok Build (image_gen + image_to_video).
+This skill is designed for Grok Build (imagine_text_to_image + imagine_image_to_video).
 The script itself only needs ffmpeg, Pillow, and numpy.
 """
 
@@ -341,13 +341,13 @@ def write_readme(out_dir: Path, meta: dict) -> None:
         "Video2dsprite output (Grok Build pipeline)",
         "==========================================",
         "base/           base still on #FF00FF",
-        "video/          image_to_video clip",
+        "video/          imagine_image_to_video clip",
         "frames-raw/     decoded frames",
         "frames-clean/   chroma-keyed RGBA frames",
         "sprite/         sampled normalized sprites + strips/grids/GIFs",
         "pipeline-meta.json",
         "",
-        "This folder was produced for Grok Build (image_gen + image_to_video).",
+        "This folder was produced for Grok Build (imagine_text_to_image + imagine_image_to_video).",
         "Codex/other agents cannot run the video step; they can still re-sample",
         "existing frames with: python video2dsprite.py sample --clean-dir ...",
         "",
@@ -417,7 +417,7 @@ def cmd_process(args: argparse.Namespace) -> int:
     )
     meta = {
         "skill": "video2dsprite",
-        "platform": "Grok Build (image_to_video required for generation step)",
+        "platform": "Grok Build (imagine_image_to_video required for generation step)",
         "name": args.name,
         "video": str(video.resolve()),
         "out_dir": str(out.resolve()),

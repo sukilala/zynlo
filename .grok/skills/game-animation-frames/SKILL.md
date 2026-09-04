@@ -10,6 +10,7 @@ description: >
   game-asset-core.
 metadata:
   short-description: "Video-first animation frames that actually cycle"
+user-invocable: false
 ---
 
 # Animation Frames — video-first
@@ -28,7 +29,7 @@ random keyable `#hex` background.
 | Step | Do this |
 | --- | --- |
 | Production sprites / fixed grids | **`generate2dsprite`** — solid **`#FF00FF`** magenta sheets + chroma scripts |
-| Denser locomotion from video | **`video2dsprite`** — base still on **`#FF00FF`** → `image_to_video` → skill scripts (ffmpeg + chroma) |
+| Denser locomotion from video | **`video2dsprite`** — base still on **`#FF00FF`** → `imagine_image_to_video` → skill scripts (ffmpeg + chroma) |
 | Keyable background | Always **`#FF00FF`** when using either pipeline (required for chroma) |
 | This skill | Loop / flip-test / motion laws below — apply after the pipeline runs |
 
@@ -41,7 +42,7 @@ laws and flip test here before shipping frames into the game.
 1. **Base frame.** Subject in neutral/starting pose, full style words, side /
    game-appropriate view, **solid `#FF00FF` background** (app-builder chroma
    key). game-asset-core defaults apply.
-2. **Animate.** `image_to_video` from the base: one clear motion, in place,
+2. **Animate.** `imagine_image_to_video` from the base: one clear motion, in place,
    static camera ("the knight walks in place, side view, camera locked",
    6s). Keep the shot simple — one subject, one motion. Prefer running this
    through **`video2dsprite`** so harvest + chroma are consistent.
@@ -59,7 +60,7 @@ laws and flip test here before shipping frames into the game.
    transparent strips/grids emitted by **`video2dsprite`** /
    **`generate2dsprite`**. State the intended fps.
 
-Fall back to keyframe-by-keyframe `image_edit` (still on `#FF00FF` when
+Fall back to keyframe-by-keyframe `imagine_text_to_image` (still on `#FF00FF` when
 postprocessing with the sprite scripts) only when video fails the motion
 (rare: very stylized poses, single dramatic keyframes) — and then plan
 phases yourself and obey the laws below. Prefer **`generate2dsprite`** for

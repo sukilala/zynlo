@@ -87,7 +87,7 @@ Deliver a fixed image plus optional coarse collision/zones only. Do not use this
 
 ## Visual Asset Source
 
-Default to built-in image generation for visual assets. Base maps, in-world reference mockups, dressed references, stage references, prop sheets, prop sprites, tileset art, parallax layers, and battle backgrounds should come from `image_gen` unless the user supplies existing art or explicitly asks for procedural placeholders.
+Default to built-in image generation for visual assets. Base maps, in-world reference mockups, dressed references, stage references, prop sheets, prop sprites, tileset art, parallax layers, and battle backgrounds should come from `imagine_text_to_image` unless the user supplies existing art or explicitly asks for procedural placeholders.
 
 Scripts may slice, assemble, chroma-key, validate, compose previews, create metadata, and emit engine files. They must not replace image generation as the creative art source for final map visuals. Engine outputs such as Godot `.tscn`, Tiled JSON, LDtk data, or Unity placement data should wire up image-generated or user-supplied assets.
 
@@ -107,17 +107,17 @@ Use an in-world reference mockup whenever object placement must be visually cohe
 
 ## Visual Reference Handoff
 
-Reference mockups must be generated from the actual visible base/background image:
+Reference mockups must be generated from the actual base/background image, passed to the image model as a real reference:
 
-1. Save the base/background image first.
-2. Immediately before the reference-mockup `image_gen` call, make the exact image visible in conversation context. For local files, call `read_file` on the saved image.
-3. The next image prompt must explicitly say to use the visible image immediately above as the visual reference.
+1. Save the base/background image first and keep its sandbox `file_path`.
+2. Pass that `file_path` on the reference-mockup `imagine_image_to_image` call. Also call `read_file` on the saved image so you can see it yourself.
+3. The image prompt must explicitly say to use the provided reference image as the visual reference.
 4. The prompt must name concrete features from the viewed image to preserve: camera framing, dimensions, horizon, terrain boundaries, road/water shapes, entrances, exits, major silhouettes, and landmark positions.
 5. The prompt must ask for an in-world reference mockup, not an annotated planning diagram.
 6. The prompt should render only visible scene objects: props, platforms, terrain chunks, hazards, gates, pickups, checkpoints, doors, exits, foreground occluders, or subtle blockout geometry.
 7. Non-visual data such as player spawns, actor spawn markers, camera bounds, patrol hints, and encounter/arena triggers must be written later as scene-hook metadata, not drawn into the image.
 
-Do not rely on filenames, paths, or vague phrasing such as "based on this map". If the image is not visible in context, stop and make it visible before generating the dressed reference or stage reference.
+Do not rely on filenames, paths, vague phrasing such as "based on this map", or the image merely being visible in conversation. If the base/background is not wired into the call as a sandbox `file_path`, stop and pass it before generating the dressed reference or stage reference.
 
 ## Layer Separation Contract
 
@@ -176,7 +176,7 @@ After a dressed reference or stage reference exists, continue into final runtime
 1. Make both the original base/background and the dressed/stage reference mockup visible in conversation context. For local files, call `read_file` on both images immediately before object-list extraction or object/prop generation.
 2. Create a concrete object list from the visible reference mockup while cross-checking the original base/background: object id, type, approximate position, approximate size, render layer, collision role, and asset strategy.
 3. For each visible runtime object, generate a separate transparent asset, extract it from a generated pack, or represent it as a tile/object layer when the engine/editor pipeline is tile-based.
-4. Every object/prop image prompt must explicitly state that the visible original base/background and visible reference mockup above are the visual context. The generated asset must match the original map style and correspond to an object visible in the reference mockup.
+4. For object/prop generation that must match the map style, pass the base/background and/or reference mockup sandbox paths, and state in the prompt that the provided reference images are the visual context. The generated asset must match the original map style and correspond to an object visible in the reference mockup.
 5. Generate or define the final props, platforms, terrain chunks, hazards, pickups, doors, gates, checkpoints, exits, foreground occluders, and other visible scene objects. Do not rely on the reference image as the runtime art for these objects.
 6. Write placement metadata, object layers, collision data, scene hooks, camera bounds, exits, and zones.
 7. Compose a QA preview from the original base/background plus the final runtime objects.

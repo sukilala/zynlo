@@ -7,6 +7,7 @@ description: >
   logos. Complements game-asset-core.
 metadata:
   short-description: "Game UI kits and icon sets"
+user-invocable: false
 ---
 
 # Game UI & Icons
@@ -18,7 +19,7 @@ the request never mentions it.
 
 ## 1. Interaction states (normal/hover/pressed)
 
-- Generate NORMAL first; hover and pressed are `image_edit`s of it with an
+- Generate NORMAL first; hover and pressed are `imagine_image_to_image` edits of it with an
   explicit freeze-list: "same shape, same size, same ornament, same frame
   thickness, same background — change ONLY <state treatment>".
 - Standard treatments: hover = subtle outer glow / slight brighten;

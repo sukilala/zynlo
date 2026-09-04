@@ -7,6 +7,7 @@ description: >
   patterns. Complements game-asset-core.
 metadata:
   short-description: "Seamless tiles and transition sets that actually tile"
+user-invocable: false
 ---
 
 # Tilesets

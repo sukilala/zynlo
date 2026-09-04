@@ -2,14 +2,15 @@
 name: video2dsprite
 description: >
   Grok Build only. Turn a 2D character still into denser animation sprites via
-  image_gen/image_edit base → image_to_video (6s/10s run-in-place) → ffmpeg
+  imagine_text_to_image base → imagine_image_to_video (6s/10s run-in-place) → ffmpeg
   frames → magenta chroma-key → dense sampled strips/grids/GIFs. Use when the
   user wants video-to-sprite, smoother run/walk cycles, or denser intermediate
   poses. Prefer generate2dsprite for crisp production pixel sheets. Triggers on
-  "video to sprite", "image_to_video sprite", "dense walk cycle", "smooth run
+  "video to sprite", "imagine_image_to_video sprite", "dense walk cycle", "smooth run
   animation from video".
 metadata:
-  short-description: "Video→dense sprites (image_to_video + chroma postprocess)"
+  short-description: "Video→dense sprites (imagine_image_to_video + chroma postprocess)"
+user-invocable: false
 ---
 
 # Video2dsprite (Grok Build only)
@@ -22,24 +23,28 @@ Convert a **base 2D character image** into **dense animation sprites** using Gro
 | --- | --- |
 | Skill dir | `.grok/skills/video2dsprite/` |
 | Scripts | `python3 .grok/skills/video2dsprite/scripts/video2dsprite.py …` |
-| Video tools | `image_to_video` / optional `reference_to_video` (verify present) |
+| Video tools | `imagine_image_to_video` — animate one base `file_path` (verify present) |
 | Inspect | `read_file` on stills/frames; report paths for videos |
 | Deps | ffmpeg + Pillow + numpy (preinstalled in app-builder image) |
 | Output home | `assets/sprites/video2dsprite/<name>/` under `/workspace` |
 | Default | Prefer **`generate2dsprite`** for production heroes; this is the denser-motion path |
 
 ```text
-base still → image_to_video (in-place motion) → extract frames → chroma key → sample/normalize → strip / grid / GIF
+base still → imagine_image_to_video (in-place motion) → extract frames → chroma key → sample/normalize → strip / grid / GIF
 ```
 
 ## Platform gate (read first)
 
 | Runtime | Supported? |
 | --- | --- |
-| **Grok Build** (xAI) | **Yes** — requires `image_gen` / `image_edit` + `image_to_video` (or `reference_to_video`) |
+| **Grok Build** (xAI) | **Yes** — requires an image generator + an image→video tool |
 | Codex / Claude / other agents | **No** — they lack Grok video tools. Tell the user this skill is Grok Build only and offer `$generate2dsprite` instead |
 
-If `image_to_video` is missing from the tool list, **stop** and explain. Do not fake motion with code-drawn frames.
+**Gate on the capability, not the exact tool name.** Image generation appears
+as `imagine_text_to_image` / `imagine_image_to_image`; video as `imagine_image_to_video`
+or (legacy) `generate_video`. Use whichever pair your tool list has. Stop and
+explain only when you have no image→video tool at all. Do not fake motion with
+code-drawn frames.
 
 This skill is an **optional denser-motion path**. It does **not** replace `$generate2dsprite`:
 
@@ -69,10 +74,10 @@ Infer from the user request:
 ## Agent rules
 
 1. **Grok-only.** Refuse on non-Grok runtimes with a short explanation + `$generate2dsprite` alternative.
-2. **Still → video, never text-to-video alone.** Stage frame 1 as a clean still (`image_gen` or `image_edit` from a reference). Then call `image_to_video`.
+2. **Still → video, never text-to-video alone.** Stage frame 1 as a clean still with `imagine_text_to_image` (from a prompt, or from a reference `file_path`). Then call `imagine_image_to_video` with that still's `file_path`.
 3. **In-place motion.** Prompt for run/walk **in place** facing a fixed direction. No camera pan, no background scroll, no scene change. Subject stays roughly centered.
 4. **Solid magenta background** on the base and preserved in the video prompt (`#FF00FF` / pure magenta). Required for flood-fill chroma.
-5. **Do not invent art with PIL/Canvas.** Base art comes from `image_gen` / `image_edit` or a user/local still. Scripts only postprocess.
+5. **Do not invent art with PIL/Canvas.** Base art comes from `imagine_text_to_image` or a user/local still. Scripts only postprocess.
 6. **Do not put experimental outputs into the game** unless the user asks to integrate.
 7. **Prefer one locomotion cycle for game use.** Dense sample across a full 6s multi-cycle clip is fine for previews; for engine sheets, optionally re-sample a single cycle (12–16 frames) after visual QC.
 8. **Report absolute paths** of video, cleaned frames, strips, and preview GIFs when done.
@@ -105,9 +110,9 @@ Create:
 
 Options:
 
-- **A. Existing sprite:** open with image tools / read image, composite onto solid `#FF00FF` if needed
-- **B. New character:** `image_gen` with solid magenta background, full body, side view, centered
-- **C. Match reference:** `image_edit` from user reference onto magenta, preserve identity
+- **A. Existing sprite:** read the image, composite onto solid `#FF00FF` if needed, then pass that sandbox path to `imagine_image_to_image` / `imagine_image_to_video`
+- **B. New character:** `imagine_text_to_image` with solid magenta background, full body, side view, centered
+- **C. Match reference:** `imagine_image_to_image` with the reference `file_path`, moving it onto magenta and preserving identity
 
 Base requirements:
 
@@ -116,15 +121,16 @@ Base requirements:
 - Same art style as the rest of the project when a reference exists
 - No text, UI, watermark, or second character
 
-Save as `<out_dir>/base/<name>-base.png`.
+Copy the returned `file_path` and save as
+`<out_dir>/base/<name>-base.png`; keep the base `file_path` for the video call.
 
 Write the exact image prompt into `prompt-used.txt`.
 
-### 3. Animate with `image_to_video`
+### 3. Animate with `imagine_image_to_video`
 
-Call Grok `image_to_video`:
+Call Grok `imagine_image_to_video`:
 
-- `image`: path to the base still
+- source path: `<base still file_path>` (sandbox path returned by T2I / I2I)
 - `duration`: `6` (default) or `10`
 - `resolution_name`: `480p` unless user asks `720p`
 - `prompt`: one short present-tense shot (see [references/prompt-rules.md](references/prompt-rules.md))
@@ -137,7 +143,8 @@ Mandatory motion constraints in the prompt:
 - Identity, costume, palette stable for the whole shot
 - Single continuous action only
 
-Copy the returned video to `<out_dir>/video/<name>-<duration>s.mp4`.
+Copy the returned video `file_path` to
+`<out_dir>/video/<name>-<duration>s.mp4`.
 
 If video tools are unavailable, stop (platform gate).
 
@@ -205,7 +212,7 @@ Do **not** modify game code unless requested.
 - Export counts: **8, 16, 24, 48**
 - Cell: **128²**, body height ~100, feet at y≈118
 - Background: **#FF00FF**
-- Prefer `image_to_video` over `reference_to_video` (compose multi-ref with `image_edit` first if needed)
+- Prefer single-asset `imagine_image_to_video` over multi-ref (compose multi-ref with `imagine_text_to_image` first if needed)
 
 ## Tradeoffs (tell the user once)
 

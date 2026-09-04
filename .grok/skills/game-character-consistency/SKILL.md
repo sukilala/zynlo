@@ -8,6 +8,7 @@ description: >
   same-subject multi-image set. Complements game-asset-core.
 metadata:
   short-description: "Same character, every image"
+user-invocable: false
 ---
 
 # Character Consistency
@@ -41,9 +42,9 @@ sentence.
 
 ## 3. Edit-chain protocol
 
-- One base image; every view/variant/state via `image_edit` from the base
-  (or nearest neighbor view): "Keep this exact character — same face,
-  colors, proportions, outfit, scale, background — change only <X>."
+- One base image; every view/variant/state via `imagine_image_to_image` with the base
+  `file_path` (or the nearest neighbor view): "Keep this exact character — same
+  face, colors, proportions, outfit, scale, background — change only <X>."
 - Views must be genuinely rotated (a side view is a strict profile: nose,
   chest, toes all pointing at the frame edge), not three slightly-turned
   fronts.

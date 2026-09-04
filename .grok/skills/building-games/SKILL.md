@@ -11,6 +11,7 @@ description: >
   "tetris", "snake", "shooter", "3d", "three.js", "canvas", "voxel", "physics".
 metadata:
   short-description: "Browser games: loop, 3D orientation, camera, perf, assets, genres"
+user-invocable: false
 ---
 
 # Building Games
@@ -162,7 +163,7 @@ forward = (-sin(yaw), 0, -cos(yaw))
   placeholders when real art is expected.
 - **2D game sprites / animation sheets** → run **`generate2dsprite`**
   (`.grok/skills/generate2dsprite/SKILL.md`): solid **`#FF00FF`** magenta
-  `image_gen` sheets + chroma postprocess scripts (magenta is required for the
+  `imagine_text_to_image` sheets + chroma postprocess scripts (magenta is required for the
   processor). Wire transparent PNGs/GIFs into Canvas/Phaser. Still apply
   **`game-asset-core`** (+ animation/character specialists when relevant).
 - **2D maps / levels / prop packs** → open **`generate2dmap`**
@@ -170,7 +171,7 @@ forward = (-sin(yaw), 0, -cos(yaw))
   props/collision for playable maps. Browser default: `raw_canvas` / Phaser.
   Tileable ground/walls → also **`game-tilesets`** for 2×2 seam checks.
 - **Optional denser locomotion** → run **`video2dsprite`** (Grok
-  `image_to_video` + sandbox scripts; magenta base). Prefer `generate2dsprite`
+  `imagine_image_to_video` + sandbox scripts; magenta base). Prefer `generate2dsprite`
   for crisp production heroes. Use **`game-animation-frames`** for loop/flip-test
   laws; prefer **`video2dsprite`** over ad-hoc ffmpeg-only harvest in this
   sandbox.
@@ -205,3 +206,8 @@ forward = (-sin(yaw), 0, -cos(yaw))
 - 3D upright & camera-agrees self-tests pass (§3, §4).
 - Runs on mobile viewport with touch controls.
 - Production build (`npm run build`) renders the built output, not just dev.
+- **Share / X card:** open the **`og`** skill — custom `public/og.jpg` **and**
+  `"type": "x:game"` in `src/lib/og/site.json`. X uses `og:type="x:game"`
+  to present the unfurl as a game card; do not use `twitter:card` or invent
+  `x:type` for this. `browser-smoke` / `brand-check` warn when canvas apps omit
+  the `site.json` field.

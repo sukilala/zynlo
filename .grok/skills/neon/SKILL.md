@@ -7,9 +7,14 @@ description: >
   "SQL", "query", "migrations".
 metadata:
   short-description: "Neon Postgres (with a local PGLite fallback) for this template"
+user-invocable: false
 ---
 
 # Neon Postgres
+
+**The database is opt-in** (AGENTS.md §0.5): use it only when the app needs data
+that outlives a browser session or is shared across devices. Otherwise ship no
+migrations, don't import `@/lib/db`, and keep state in `localStorage` / zustand.
 
 This template ships a ready-made, **dual-mode** database integration:
 
@@ -23,6 +28,20 @@ the regular Postgres driver) and `@electric-sql/pglite` (local DB fallback).
 
 For **user accounts, sign-in, and reading the current user**, see the separate
 **`auth` skill** — this skill is just the database.
+
+## Turning the database on
+
+Set `deploy.database` to `true` in `.grok/app-env.json`:
+
+```json
+{ "VITE_AUTH_ENABLED": "false", "deploy": { "database": true } }
+```
+
+That is what tells the platform to provision Neon for the deployed app; leave it
+`false` and the deploy gets no `DATABASE_URL`, so the app silently runs on a
+throwaway PGLite that loses its rows. Shipping `migrations/*.sql`, or sign-in,
+provisions one regardless — this flag is for an app that queries `@/lib/db`
+without either. It is not a `VITE_` key and never reaches the browser.
 
 ## Env vars — do **not** create a `.env` file
 
@@ -57,11 +76,11 @@ export const listPosts = createServerFn({ method: "GET" }).handler(async () => {
 });
 ```
 
-**Per-user data (mandatory when rows belong to a user).** A regular driver has
-full DB access, so scope **every** query to the authenticated user server-side —
-never trust a client-sent id. Use the prewired **`authMiddleware`** to get a
-verified `context.userId`, then filter by it. Full pattern (middleware, calling
-from client code, fail-closed semantics) is in the **`auth` skill**:
+**Per-user data (only once the app has sign-in).** A regular driver has full DB
+access, so scope **every** query to the authenticated user server-side — never
+trust a client-sent id. Use the prewired **`authMiddleware`** to get a verified
+`context.userId`, then filter by it. Full pattern (middleware, calling from
+client code, fail-closed semantics) is in the **`auth` skill**:
 
 ```ts
 import { authMiddleware } from "@/lib/auth/middleware";
@@ -75,6 +94,20 @@ export const listTodos = createServerFn({ method: "GET" })
 // mutations must scope writes too: `... where id = ${id} and user_id = ${context.userId}`
 ```
 
+**Without sign-in (the default), do NOT use `authMiddleware` / `requireUserId`.**
+The dev user they fall back to is a preview-only convenience. A deployed app's
+`VITE_AUTH_ENABLED` is set by the platform, not by this workspace (today the
+deployer always sets it to `"true"`), so deployed, both reject every visitor —
+and an auth-off app ships no sign-in route for them to recover with. A
+database-only app keeps its rows unowned: no `user_id` column, or one literal
+constant. Add the middleware as part of turning sign-in on (the `auth` skill's
+upgrade steps), and re-scope or drop those rows then.
+
+Unowned rows are world-readable and world-writable through your public server
+functions: never persist personal or sensitive data (names, emails, free text
+about a person) in this mode, and leave out destructive bulk mutations
+(delete-all, overwrite-all) — if the app needs them, propose sign-in instead.
+
 ## Migrations
 
 `migrations/*.sql` are the single schema source. They apply to **Neon on deploy**
@@ -82,8 +115,10 @@ export const listTodos = createServerFn({ method: "GET" })
 the schema ready) and to the **PGLite** preview **automatically on startup**, so
 dev matches prod.
 
-`0001_auth.sql` is the Better Auth schema (**do not edit** — see the `auth`
-skill). Put your app's schema in NEW ordered files starting at `0002`:
+Neither applier descends into subdirectories, so the Better Auth schema at
+`migrations/auth/0001_auth.sql` is **not** applied unless the app turns sign-in
+on and copies it up (**do not edit** it — see the `auth` skill). Put your app's
+schema in NEW ordered files starting at `0002`:
 
 ```sql
 -- migrations/0002_schema.sql — example for a todos app; use YOUR app's tables

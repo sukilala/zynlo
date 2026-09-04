@@ -65,7 +65,7 @@ python3 .grok/skills/generate2dsprite/scripts/make_layout_guide.py \
   --output assets/props/raw/<name>-layout-guide.png
 ```
 
-Make the guide visible before image generation. Tell the model to use it only for invisible slot count, spacing, centering, and safe padding. The output must not copy guide boxes, safe-area rectangles, center marks, labels, borders, or guide background.
+Pass the guide PNG's sandbox path to `imagine_image_to_image`. Tell the model to use it only for invisible slot count, spacing, centering, and safe padding. The output must not copy guide boxes, safe-area rectangles, center marks, labels, borders, or guide background.
 
 ```text
 Create exactly one <ROWS>x<COLS> prop sheet for a top-down 2D RPG map.
