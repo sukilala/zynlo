@@ -28,8 +28,10 @@ const collectionCache: Partial<
   Record<Collection, { etag: string; data: unknown }>
 > = {};
 let mappedCache: { at: number; data: ZynloData } | null = null;
+let cacheGen = 0;
 
 function invalidateCache(col?: Collection) {
+  cacheGen += 1;
   mappedCache = null;
   if (col) delete collectionCache[col];
   else {
@@ -162,6 +164,7 @@ function mapAgent(r: Record<string, unknown>): Agent {
     email: String(r.email || ""),
     role: String(r.role || "Agent"),
     status: (r.status as Agent["status"]) || "Active",
+    passwordHash: r.passwordHash ? String(r.passwordHash) : "",
   };
 }
 
@@ -283,11 +286,15 @@ function resolveClientId(
   return null;
 }
 
-export async function firebaseLoadAll(): Promise<ZynloData> {
+export async function firebaseLoadAll(retries = 0): Promise<ZynloData> {
   if (mappedCache && Date.now() - mappedCache.at < 20000) {
     return mappedCache.data;
   }
+  const gen = cacheGen;
   const root = await loadCollections();
+  if (gen !== cacheGen && retries < 2) {
+    return firebaseLoadAll(retries + 1);
+  }
   for (const col of COLLECTIONS) {
     if (needsMigration(root[col])) {
       root[col] = toIdMap(root[col]);
@@ -313,6 +320,10 @@ export async function firebaseLoadAll(): Promise<ZynloData> {
   );
 
   const data = { agents, customers, clients, calls, messages };
+  if (gen !== cacheGen) {
+    if (retries < 2) return firebaseLoadAll(retries + 1);
+    return data;
+  }
   mappedCache = { at: Date.now(), data };
   return data;
 }
@@ -358,16 +369,28 @@ export async function firebaseUpsertAgent(input: {
   email?: string;
   role?: string;
   status?: string;
+  passwordHash?: string;
 }): Promise<Agent> {
   const name = input.name.trim();
   if (!name) throw new Error("Name is required");
   const id = input.id || uid();
+  let prev: Record<string, unknown> | null = null;
+  if (input.id) {
+    prev = await rtdbFetch<Record<string, unknown> | null>(
+      `/agents/${encodeURIComponent(id)}.json`,
+    );
+  }
+  const passwordHash =
+    input.passwordHash ||
+    (prev && typeof prev.passwordHash === "string" ? prev.passwordHash : "");
+  if (!passwordHash) throw new Error("Password is required");
   const row = {
     id,
     name,
     email: (input.email || "").trim(),
     role: input.role || "Agent",
     status: input.status || "Active",
+    passwordHash,
   };
   await putItem("agents", id, row);
   return mapAgent(row);
@@ -484,9 +507,17 @@ export async function firebaseUpsertCall(input: {
     }
   }
   const rating =
-    input.rating == null || (input.rating as unknown) === ""
-      ? null
-      : Number(input.rating);
+    input.rating === undefined
+      ? prev && prev.rating != null && prev.rating !== ""
+        ? Number(prev.rating)
+        : null
+      : input.rating == null || (input.rating as unknown) === ""
+        ? null
+        : (() => {
+            const n = Number(input.rating);
+            if (!Number.isFinite(n) || n <= 0) return null;
+            return Math.min(10, n);
+          })();
   const prevScale =
     prev?.ratingScale === 5 || prev?.ratingScale === 10
       ? (prev.ratingScale as 5 | 10)
@@ -503,7 +534,7 @@ export async function firebaseUpsertCall(input: {
     rating,
     ratingScale:
       rating == null
-        ? null
+        ? (prev?.ratingScale as 5 | 10 | null | undefined) ?? null
         : input.ratingScale === 5 && rating <= 5
           ? 5
           : input.ratingScale === 10
@@ -511,18 +542,25 @@ export async function firebaseUpsertCall(input: {
             : prevScale === 5 && rating <= 5
               ? 5
               : 10,
-    notes: (input.notes || "").trim(),
+    notes:
+      input.notes != null
+        ? String(input.notes).trim()
+        : String(prev?.notes || "").trim(),
     followUpAt: input.followUpAt ? String(input.followUpAt).slice(0, 10) : null,
     source:
       prev?.source === "telecom" || input.source === "telecom"
         ? "telecom"
         : "manual",
     csvCounted:
-      input.csvCounted === false || prev?.csvCounted === false
+      input.csvCounted === false
         ? false
-        : input.csvCounted === true || prev?.csvCounted === true
+        : input.csvCounted === true
           ? true
-          : undefined,
+          : prev?.csvCounted === false
+            ? false
+            : prev?.csvCounted === true
+              ? true
+              : undefined,
   };
   await putItem("calls", id, row);
   return mapCall(row);

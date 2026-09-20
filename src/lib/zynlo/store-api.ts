@@ -28,6 +28,8 @@ export async function upsertAgent(body: Record<string, unknown>) {
     email: body.email != null ? String(body.email) : undefined,
     role: body.role != null ? String(body.role) : undefined,
     status: body.status != null ? String(body.status) : undefined,
+    passwordHash:
+      body.passwordHash != null ? String(body.passwordHash) : undefined,
   });
 }
 

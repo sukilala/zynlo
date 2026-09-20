@@ -121,6 +121,12 @@ export function resolutionOf(
   };
 }
 
+/**
+ * Stored score on a /10 scale.
+ * ratingScale 10 = already /10.
+ * ratingScale 5 or missing + value <= 5 = old /5 score, doubled.
+ * Values above 5 with no scale are already /10.
+ */
 export function callRating(c: {
   rating?: number | string | null;
   ratingScale?: 5 | 10 | null;
@@ -128,8 +134,11 @@ export function callRating(c: {
   if (c.rating == null || c.rating === "") return null;
   const n = Number(c.rating);
   if (!Number.isFinite(n) || n <= 0) return null;
-  const out = c.ratingScale === 10 || n > 5 ? n : n * 2;
-  return Math.round(Math.min(10, out) * 10) / 10;
+  const out =
+    c.ratingScale === 10 || n > 5
+      ? n
+      : n * 2;
+  return Math.round(Math.min(10, Math.max(0, out)) * 10) / 10;
 }
 
 /** Hidden CSV extras stay in Firebase but are off the log / KPIs. */
@@ -144,7 +153,7 @@ export function countsInCallLog(c: {
   return true;
 }
 
-/** Agent QA only. CSV/telecom inserts and hidden extras do not score. */
+/** Agent QA on CSV-counted log calls only. Same set as export / PDF. */
 export function qaEligible(c: {
   source?: string | null;
   outcome?: string;
@@ -172,8 +181,15 @@ export function qaScore(c: {
   csvCounted?: boolean | null;
   rating?: number | string | null;
   ratingScale?: 5 | 10 | null;
+  notes?: string | null;
 }): number | null {
   return qaEligible(c) ? callRating(c) : null;
+}
+
+/** Averages always two decimals. 9.165 → 9.17 */
+export function formatQa(n: number | null | undefined): string {
+  if (n == null || !Number.isFinite(Number(n)) || Number(n) <= 0) return "-";
+  return Number(n).toFixed(2);
 }
 
 export function countsAsInbound(c: {
@@ -271,11 +287,10 @@ export function getAgentStats(data: ZynloData, agentId: string) {
     avgDuration,
     csat,
     openFollowUps:
-      agentCalls.filter(
-        (c) => c.outcome === "Follow-up" || c.outcome === "Escalated",
-      ).length +
+      agentCalls.filter((c) => c.outcome === "Follow-up").length +
       agentMsgs.filter((m) => m.status === "Open" || m.status === "Pending")
         .length,
+    openEscalations: agentCalls.filter((c) => c.outcome === "Escalated").length,
     weekQa: week.avg,
     weekRated: week.rated,
     lastWeekQa: lastWeek.avg,
@@ -511,11 +526,11 @@ export function startOfWeekStr(offsetWeeks = 0): string {
 }
 
 export function rangeQa(calls: Call[], from: string, to: string) {
-  const list = calls.filter((c) => {
-    if (!countsInCallLog(c)) return false;
+  const inRange = (c: Call) => {
     const d = (c.datetime || "").slice(0, 10);
     return d >= from && d <= to;
-  });
+  };
+  const list = calls.filter((c) => inRange(c) && countsInCallLog(c));
   const scores = list
     .filter(qaEligible)
     .map(callRating)
@@ -605,6 +620,81 @@ export function getActionableFollowUps(data: ZynloData): FollowUpItem[] {
     if (!f.hasDueDate) return true;
     return f.due <= today;
   });
+}
+
+export type EscalationItem = {
+  id: string;
+  datetime: string;
+  due: string;
+  overdue: boolean;
+  hasDueDate: boolean;
+  ageDays: number;
+  agentId: string;
+  customerId: string;
+  clientId: string | null;
+  type: string;
+  notes: string;
+  bucket: "overdue" | "today" | "aging" | "open";
+};
+
+function calendarAgeDays(datetime: string): number {
+  const d = (datetime || "").slice(0, 10);
+  if (!d) return 0;
+  const a = new Date(d + "T12:00:00").getTime();
+  const b = new Date(todayStr() + "T12:00:00").getTime();
+  if (!Number.isFinite(a) || !Number.isFinite(b)) return 0;
+  return Math.max(0, Math.round((b - a) / 86400000));
+}
+
+/** Open escalated calls on the CSV-counted log. */
+export function getEscalationItems(data: ZynloData): EscalationItem[] {
+  const today = todayStr();
+  const items: EscalationItem[] = [];
+  for (const c of data.calls) {
+    if (!countsInCallLog(c)) continue;
+    if (c.outcome !== "Escalated") continue;
+    const hasDueDate = Boolean(c.followUpAt);
+    const due = hasDueDate ? String(c.followUpAt).slice(0, 10) : "";
+    const overdue = hasDueDate && due < today;
+    const ageDays = calendarAgeDays(c.datetime);
+    const bucket: EscalationItem["bucket"] = overdue
+      ? "overdue"
+      : hasDueDate && due === today
+        ? "today"
+        : ageDays >= 7
+          ? "aging"
+          : "open";
+    items.push({
+      id: c.id,
+      datetime: c.datetime,
+      due,
+      overdue,
+      hasDueDate,
+      ageDays,
+      agentId: c.agentId,
+      customerId: c.customerId,
+      clientId: c.clientId,
+      type: c.type,
+      notes: c.notes || "",
+      bucket,
+    });
+  }
+  items.sort((a, b) => {
+    const rank = { overdue: 0, today: 1, aging: 2, open: 3 };
+    if (rank[a.bucket] !== rank[b.bucket]) return rank[a.bucket] - rank[b.bucket];
+    if (b.ageDays !== a.ageDays) return b.ageDays - a.ageDays;
+    return (b.datetime || "").localeCompare(a.datetime || "");
+  });
+  return items;
+}
+
+export function summarizeEscalations(items: EscalationItem[]) {
+  return {
+    open: items.length,
+    overdue: items.filter((i) => i.bucket === "overdue").length,
+    dueToday: items.filter((i) => i.bucket === "today").length,
+    aging: items.filter((i) => i.bucket === "aging" || i.ageDays >= 7).length,
+  };
 }
 
 export function getUnratedRecent(data: ZynloData, days = 14): Call[] {

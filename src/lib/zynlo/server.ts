@@ -42,6 +42,7 @@ export const saveAgent = createServerFn({ method: "POST" })
       email?: string;
       role?: string;
       status?: string;
+      passwordHash?: string;
     }) => d,
   )
   .handler(async ({ data }): Promise<Agent> => firebaseUpsertAgent(data));

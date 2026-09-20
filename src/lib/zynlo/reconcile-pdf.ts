@@ -23,6 +23,7 @@ export type TelecomParse = {
   rows: TelecomRow[];
   generatedBy: string;
   fileDirection: CallType | null;
+  queueAnswered?: boolean;
 };
 
 export type DirectionFix = {
@@ -114,7 +115,9 @@ export function detectCallDirection(
     return "Outbound";
   }
   if (
-    /\bincoming\b|\binbound\b|\bin coming\b|\bin-coming\b/.test(blob)
+    /\bincoming\b|\binbound\b|\bin coming\b|\bin-coming\b|\banswered\s*calls?\b/.test(
+      blob,
+    )
   ) {
     return "Inbound";
   }
@@ -289,7 +292,7 @@ export function parseTelecomText(
       disposition: normalizeDisposition(dispMatch[1], hhmmssToMinutes(durationRaw)),
       agentHint: generatedBy,
       agentId: "",
-      uid: "",
+      uid: `${toIsoLocal(dtMatch[1])}|${phone}|${type}|${durationRaw}`,
     });
   }
   return rows;
@@ -301,6 +304,7 @@ export function looksLikeCsv(text: string): boolean {
     (first.includes(",") || first.includes(";")) &&
     (first.includes("disposition") ||
       first.includes("caller") ||
+      first.includes("queue") ||
       first.includes("call type") ||
       first.includes("duration") ||
       first.includes("destination"))
@@ -367,6 +371,23 @@ function headerIndex(headers: string[], aliases: string[]): number {
   return -1;
 }
 
+function isQueueAnsweredCsv(headers: string[]): boolean {
+  const hasCaller = headerIndex(headers, ["caller", "caller id"]) >= 0;
+  const hasDur = headerIndex(headers, ["duration"]) >= 0;
+  if (!hasCaller || !hasDur) return false;
+  const hasQueue = headerIndex(headers, ["queue"]) >= 0;
+  const hasWait = headerIndex(headers, ["wait", "wait time"]) >= 0;
+  const hasDisc = headerIndex(headers, ["disconnection", "disconnect"]) >= 0;
+  const hasPos = headerIndex(headers, ["position"]) >= 0;
+  return hasQueue || hasWait || hasDisc || hasPos;
+}
+
+export function csvIsQueueAnswered(text: string): boolean {
+  const table = parseCsvRows(text);
+  if (table.length < 2) return false;
+  return isQueueAnsweredCsv(table[findHeaderRow(table)].map(normHeader));
+}
+
 function findHeaderRow(table: string[][]): number {
   const max = Math.min(table.length, 20);
   for (let i = 0; i < max; i++) {
@@ -375,7 +396,7 @@ function findHeaderRow(table: string[][]): number {
     const hasDisp =
       headerIndex(headers, ["disposition", "call status", "result"]) >= 0;
     const hasType = headerIndex(headers, ["call type", "direction"]) >= 0;
-    if (hasDate && (hasDisp || hasType)) return i;
+    if (hasDate && (hasDisp || hasType || isQueueAnsweredCsv(headers))) return i;
   }
   return 0;
 }
@@ -459,6 +480,7 @@ export function parseTelecomCsv(
   if (table.length < 2) return [];
   const headerAt = findHeaderRow(table);
   const headers = table[headerAt].map(normHeader);
+  const queueAnswered = isQueueAnsweredCsv(headers);
   const iDate = headerIndex(headers, ["date", "datetime", "start time"]);
   const iCaller = headerIndex(headers, [
     "caller id",
@@ -513,7 +535,8 @@ export function parseTelecomCsv(
       (iDate >= 0 ? cells[iDate] : "") || joined,
     );
     const cellType = typeFromLabel(typeRaw) || typeFromLabel(joined);
-    const type: CallType | null = fileDirection || cellType;
+    const type: CallType | null =
+      fileDirection || cellType || (queueAnswered ? "Inbound" : null);
     if (!type) continue;
     const phoneSrc =
       type === "Outbound"
@@ -527,8 +550,12 @@ export function parseTelecomCsv(
     if (!datetime || phone.length < 7) continue;
     const talk = parseDurationCell(iTalk >= 0 ? cells[iTalk] || "" : "");
     const total = parseDurationCell(iDur >= 0 ? cells[iDur] || "" : "");
-    const disposition = normalizeDisposition(disp, talk.min);
+    const inboundQueue = queueAnswered && type === "Inbound";
+    const disposition = inboundQueue
+      ? "ANSWERED"
+      : normalizeDisposition(disp, talk.min);
     let dur = talk.min > 0 ? talk : disposition === "ANSWERED" ? total : { min: 0, raw: talk.raw || total.raw };
+    if (inboundQueue && dur.min === 0 && total.min > 0) dur = total;
     if (disposition === "ANSWERED" && dur.min === 0) {
       const clocks = joined.match(/\d{1,2}:\d{2}:\d{2}/g) || [];
       const dateRaw = iDate >= 0 ? cells[iDate] || "" : "";
@@ -536,6 +563,8 @@ export function parseTelecomCsv(
       if (extra) dur = parseDurationCell(extra);
     }
     const agentHint = (iAgent >= 0 ? cells[iAgent] : "") || generatedBy;
+    const uid = (iUid >= 0 ? cells[iUid] || "" : "").trim()
+      || `${datetime}|${phone}|${type}|${dur.raw}`;
     rows.push({
       datetime,
       phone,
@@ -546,7 +575,7 @@ export function parseTelecomCsv(
       disposition,
       agentHint: agentHint.trim(),
       agentId: "",
-      uid: (iUid >= 0 ? cells[iUid] || "" : "").trim(),
+      uid,
     });
   }
   return rows;
@@ -638,6 +667,7 @@ function closestCall(
   data: ZynloData,
   sameTypeOnly: boolean,
   index?: CallIndex,
+  used?: Set<string>,
 ): Call | undefined {
   const target = callTime(row.datetime);
   if (!target) return undefined;
@@ -646,11 +676,14 @@ function closestCall(
   let best: Call | undefined;
   let bestDelta = CRM_MATCH_MS + 1;
   for (const call of candidates) {
+    if (used?.has(call.id)) continue;
     const ct = callTime(call.datetime);
     if (!ct) continue;
     const delta = Math.abs(ct - target);
     if (delta > CRM_MATCH_MS) continue;
-    const callDir = directionOf(call.type);
+    const callDir =
+      call.type === "Outbound" ? "Outbound" : call.type === "Inbound" ? "Inbound" : "";
+    if (!callDir) continue;
     const rowDir = directionOf(row.type);
     if (sameTypeOnly && callDir !== rowDir) continue;
     if (!sameTypeOnly && callDir === rowDir) continue;
@@ -668,8 +701,9 @@ export function matchExistingCall(
   data: ZynloData,
   sameTypeOnly = true,
   index?: CallIndex,
+  used?: Set<string>,
 ): Call | undefined {
-  return closestCall(row, data, sameTypeOnly, index);
+  return closestCall(row, data, sameTypeOnly, index, used);
 }
 
 export function buildReconcilePreviewFromRows(
@@ -678,6 +712,7 @@ export function buildReconcilePreviewFromRows(
   data: ZynloData,
   agents: Agent[] = [],
   fileDirection: CallType | null = null,
+  queueAnswered = false,
 ): ReconcilePreview {
   const answered = answeredCustomerRows(all);
   const callIndex = buildCallIndex(data);
@@ -688,7 +723,7 @@ export function buildReconcilePreviewFromRows(
   const seen = new Set<string>();
 
   for (const row of answered) {
-    const same = closestCall(row, data, true, callIndex);
+    const same = closestCall(row, data, true, callIndex, seen);
     if (same && !seen.has(same.id)) {
       seen.add(same.id);
       matchedIds.push(same.id);
@@ -727,23 +762,55 @@ export function buildReconcilePreviewFromRows(
     matchAgentId(names[0] || "", agents);
   const detectedAgentName = names.join(", ");
   const extraIds: string[] = [];
-  if (detectedAgentId) {
-    const matched = new Set(matchedIds);
-    const dates = new Set(
-      answered.map((r) => (r.datetime || "").slice(0, 10)).filter(Boolean),
-    );
-    const dir = fileDirection;
+  const matched = new Set(matchedIds);
+  const inboundDays = new Set(
+    answered
+      .filter((r) => r.type === "Inbound")
+      .map((r) => (r.datetime || "").slice(0, 10))
+      .filter(Boolean),
+  );
+  const outboundDays = new Set(
+    answered
+      .filter((r) => r.type === "Outbound")
+      .map((r) => (r.datetime || "").slice(0, 10))
+      .filter(Boolean),
+  );
+
+  const hideUnmatched = (
+    dir: "Inbound" | "Outbound",
+    days: Set<string>,
+  ) => {
+    if (days.size === 0) return;
     for (const call of data.calls) {
       if (call.csvCounted === false) continue;
       if (matched.has(call.id)) continue;
-      if (call.source === "telecom") continue;
-      if (call.agentId !== detectedAgentId) continue;
+      if (call.type !== dir) continue;
+      if (call.outcome === "No Answer" || call.outcome === "Voicemail") continue;
       const day = (call.datetime || "").slice(0, 10);
-      if (!dates.has(day)) continue;
-      if (dir && directionOf(call.type) !== dir) continue;
+      if (!days.has(day)) continue;
       extraIds.push(call.id);
     }
-  }
+  };
+
+  const name = (filename || "").toLowerCase();
+  const outboundTruth =
+    fileDirection === "Outbound" ||
+    /\boutgoing\b|\boutbound\b|\bout going\b|\bout-going\b|\bdialled\b|\bdialed\b/.test(
+      name,
+    );
+  const inboundTruth =
+    fileDirection !== "Outbound" &&
+    (queueAnswered ||
+      fileDirection === "Inbound" ||
+      /\banswered\s*calls?\b|\bincoming\b|\binbound\b/.test(name));
+  const mixedBatch = inboundDays.size > 0 && outboundDays.size > 0;
+  const onlyOutbound = outboundDays.size > 0 && inboundDays.size === 0;
+  const onlyInbound = inboundDays.size > 0 && outboundDays.size === 0;
+
+  // CSV answered rows are the cap for that direction on those days.
+  // Outgoing files without "outgoing" in the name still cap outbound.
+  if (inboundTruth || mixedBatch || onlyInbound) hideUnmatched("Inbound", inboundDays);
+  if (outboundTruth || mixedBatch || onlyOutbound) hideUnmatched("Outbound", outboundDays);
   return {
     filename,
     answered: answered.length,
@@ -770,10 +837,12 @@ export function buildReconcilePreview(
   agents: Agent[] = [],
 ): ReconcilePreview {
   const dir = detectCallDirection(filename, text);
+  const queue = looksLikeCsv(text) && csvIsQueueAnswered(text);
+  const fileDir = dir || (queue ? "Inbound" : null);
   const all = looksLikeCsv(text)
-    ? parseTelecomCsv(text, dir)
-    : parseTelecomText(text, dir);
-  return buildReconcilePreviewFromRows(filename, all, data, agents, dir);
+    ? parseTelecomCsv(text, fileDir)
+    : parseTelecomText(text, fileDir);
+  return buildReconcilePreviewFromRows(filename, all, data, agents, fileDir, queue);
 }
 
 export async function extractPdfText(file: File | ArrayBuffer): Promise<string> {
@@ -839,7 +908,10 @@ export async function parseTelecomFile(
     file.type.includes("excel")
   ) {
     const text = await file.text();
-    const fileDirection = detectCallDirection(file.name, text);
+    const queueAnswered = csvIsQueueAnswered(text);
+    const fileDirection =
+      detectCallDirection(file.name, text) ||
+      (queueAnswered ? "Inbound" : null);
     const generatedBy = extractGeneratedBy(text);
     return {
       rows: stampAgents(
@@ -850,6 +922,7 @@ export async function parseTelecomFile(
       ),
       generatedBy,
       fileDirection,
+      queueAnswered,
     };
   }
   const text = await extractPdfText(file);

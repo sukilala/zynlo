@@ -25,6 +25,8 @@ export interface Agent {
   email: string;
   role: string;
   status: AgentStatus;
+  /** SHA-256 of pepper|id|password. Never shown in the UI. */
+  passwordHash?: string;
 }
 
 /**
@@ -106,14 +108,17 @@ export interface ZynloData {
 export const OUTCOMES: CallOutcome[] = [
   "Resolved",
   "Escalated",
-  "Follow-up",
-  "No Answer",
-  "Voicemail",
   "Answered",
 ];
 
 export const CALL_TYPES: CallType[] = ["Inbound", "Outbound", "Callback"];
-export const AGENT_ROLES = ["Agent", "Senior Agent", "Team Lead", "Supervisor"];
+export const AGENT_ROLES = [
+  "Agent",
+  "Senior Agent",
+  "Team Lead",
+  "Supervisor",
+  "Admin",
+];
 export const AGENT_STATUSES: AgentStatus[] = [
   "Active",
   "Away",

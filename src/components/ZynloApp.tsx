@@ -9,6 +9,7 @@ import {
   FileText,
   FileUp,
   LayoutDashboard,
+  LogOut,
   Menu,
   MessageSquare,
   Pencil,
@@ -82,19 +83,27 @@ import {
   getClientStats,
   customersSharingPhone,
   getCustomerStats,
+  getEscalationItems,
   getFollowUpItems,
   getUnratedRecent,
-  groupUnratedCalls,
   localDatetimeValue,
   periodQa,
   qaEligible,
   qaScore,
+  formatQa,
   resolutionOf,
   shortNotes,
+  summarizeEscalations,
   todayStr,
   yesterdayStr,
 } from "@/lib/zynlo/utils";
 import { downloadClientPdf } from "@/lib/zynlo/pdf-report";
+import {
+  clearAgentSession,
+  hashAgentPassword,
+  readAgentSession,
+  writeAgentSession,
+} from "@/lib/zynlo/session";
 import {
   buildReconcilePreviewFromRows,
   crmOutcomeForRow,
@@ -227,6 +236,8 @@ export function ZynloApp({ initial }: { initial: ZynloData }) {
 	const [busy, setBusy] = useState(false);
 	const [listLimit, setListLimit] = useState(40);
 	const [callSearch, setCallSearch] = useState("");
+	const [callDateFrom, setCallDateFrom] = useState("");
+	const [callDateTo, setCallDateTo] = useState("");
 	const [callOutcome, setCallOutcome] = useState("");
 	const [callAgent, setCallAgent] = useState("");
 	const [callType, setCallType] = useState("");
@@ -241,6 +252,10 @@ export function ZynloApp({ initial }: { initial: ZynloData }) {
 	const [selectedClientId, setSelectedClientId] = useState(null);
 	const [selectedCustomerId, setSelectedCustomerId] = useState(null);
 	const [meAgentId, setMeAgentId] = useState("");
+	const [session, setSession] = useState(readAgentSession);
+	const [loginAgentId, setLoginAgentId] = useState(readLastAgentId);
+	const [loginPassword, setLoginPassword] = useState("");
+	const [loginErr, setLoginErr] = useState("");
 	const [queueScope, setQueueScope] = useState("mine");
 	const [nameOverwrite, setNameOverwrite] = useState("keep");
 	const [quickForm, setQuickForm] = useState({
@@ -286,7 +301,8 @@ export function ZynloApp({ initial }: { initial: ZynloData }) {
 		name: "",
 		email: "",
 		role: "Agent",
-		status: "Active"
+		status: "Active",
+		password: ""
 	});
 	const [customerForm, setCustomerForm] = useState({
 		name: "",
@@ -406,11 +422,21 @@ export function ZynloApp({ initial }: { initial: ZynloData }) {
 	};
 	const mergeCustomers = async (args) => mergeCustomersRemote(args);
 	useEffect(() => {
-		const saved = readLastAgentId();
+		const saved = session?.agentId || readLastAgentId();
 		const pool = data.agents;
 		if (saved && pool.some((a) => a.id === saved)) setMeAgentId(saved);
 		else if (pool[0]?.id) setMeAgentId(pool[0].id);
-	}, [data.agents]);
+	}, [data.agents, session]);
+	useEffect(() => {
+		if (!session || data.agents.length === 0) return;
+		const agent = data.agents.find((a) => a.id === session.agentId);
+		if (!agent || !agent.passwordHash || agent.passwordHash !== session.proof) {
+			clearAgentSession();
+			setSession(null);
+			return;
+		}
+		if (agent.role === "Admin") setQueueScope("all");
+	}, [data.agents, session]);
 	useEffect(() => {
 		refresh().catch((err) => {
 			toast(err instanceof Error ? err.message : "Could not load data");
@@ -418,7 +444,7 @@ export function ZynloApp({ initial }: { initial: ZynloData }) {
 	}, [refresh, toast]);
 	useEffect(() => {
 		setListLimit(40);
-	}, [section, callSearch, callOutcome, callAgent, callType, msgSearch, msgChannel, msgStatus, customerSearch, clientSearch]);
+	}, [section, callSearch, callDateFrom, callDateTo, callOutcome, callAgent, callType, msgSearch, msgChannel, msgStatus, customerSearch, clientSearch]);
 	function pickAgent() {
 		if (meAgentId && data.agents.some((a) => a.id === meAgentId)) return meAgentId;
 		return data.agents[0]?.id || "";
@@ -426,6 +452,43 @@ export function ZynloApp({ initial }: { initial: ZynloData }) {
 	function setWorkingAgent(id) {
 		setMeAgentId(id);
 		writeLastAgentId(id);
+	}
+	async function onLogin(e) {
+		e.preventDefault();
+		const agent = data.agents.find((a) => a.id === loginAgentId);
+		if (!agent) {
+			setLoginErr("Select your name");
+			return;
+		}
+		if (!loginPassword.trim()) {
+			setLoginErr("Enter your password");
+			return;
+		}
+		setBusy(true);
+		setLoginErr("");
+		try {
+			const proof = await hashAgentPassword(agent.id, loginPassword);
+			if (!agent.passwordHash || proof !== agent.passwordHash) {
+				setLoginErr("Wrong password");
+				return;
+			}
+			writeAgentSession(agent.id, proof);
+			setSession({
+				agentId: agent.id,
+				proof
+			});
+			setWorkingAgent(agent.id);
+			setLoginPassword("");
+		} finally {
+			setBusy(false);
+		}
+	}
+	function onSignOut() {
+		clearAgentSession();
+		setSession(null);
+		setLoginAgentId(meAgentId || readLastAgentId());
+		setLoginPassword("");
+		setLoginErr("");
 	}
 	async function onReconcileFiles(files) {
 		const list = files.slice(0, 10);
@@ -436,8 +499,10 @@ export function ZynloApp({ initial }: { initial: ZynloData }) {
 			const names = [];
 			const dirs = /* @__PURE__ */ new Set();
 			let named = 0;
+			let queueAnswered = false;
 			const parsedList = await Promise.all(list.map((file) => parseTelecomFile(file, data.agents)));
 			parsedList.forEach((parsed, i) => {
+				if (parsed.queueAnswered) queueAnswered = true;
 				if (parsed.fileDirection === "Inbound" || parsed.fileDirection === "Outbound") {
 					dirs.add(parsed.fileDirection);
 					named += 1;
@@ -446,7 +511,7 @@ export function ZynloApp({ initial }: { initial: ZynloData }) {
 				for (const r of parsed.rows) allRows.push(r);
 			});
 			const fileDirection = named === list.length && dirs.size === 1 ? [...dirs][0] : null;
-			const preview = buildReconcilePreviewFromRows(names.length === 1 ? names[0] : `${names.length} files`, allRows, data, data.agents, fileDirection);
+			const preview = buildReconcilePreviewFromRows(names.length === 1 ? names[0] : `${names.length} files`, allRows, data, data.agents, fileDirection, queueAnswered);
 			setReconcilePreview(preview);
 			if (preview.answered === 0) toast("No answered inbound or outbound calls in these files");
 			else toast(`${names.length} file${names.length === 1 ? "" : "s"} · ${preview.answered} answered`);
@@ -503,13 +568,17 @@ export function ZynloApp({ initial }: { initial: ZynloData }) {
 			]);
 			const toAdd = [];
 			for (const row of reconcilePreview.missing) {
-				const hit = matchExistingCall(row, liveData, true);
+				const hit = matchExistingCall(row, liveData, true, void 0, used);
 				if (hit && !used.has(hit.id)) {
 					used.add(hit.id);
 					continue;
 				}
 				toAdd.push(row);
 			}
+			const ccId =
+				live.clients.find((c) => /cc\s*express/i.test(c.name || ""))?.id ||
+				live.clients[0]?.id ||
+				null;
 			for (const row of toAdd) {
 				let customer = findCustomerByPhone(customers, row.phone) || null;
 				if (!customer) {
@@ -518,7 +587,7 @@ export function ZynloApp({ initial }: { initial: ZynloData }) {
 						phone: row.phone,
 						email: "",
 						company: "",
-						clientId: null,
+						clientId: ccId,
 						notes: ""
 					} });
 					customers = [...customers, customer];
@@ -533,7 +602,7 @@ export function ZynloApp({ initial }: { initial: ZynloData }) {
 					datetime: row.datetime,
 					agentId: row.agentId || matchAgentId(row.agentHint, live.agents) || "",
 					customerId: customer.id,
-					clientId: customer.clientId,
+					clientId: customer.clientId || ccId,
 					type: row.type,
 					duration: row.durationMin,
 					outcome: crmOutcomeForRow(row),
@@ -550,11 +619,24 @@ export function ZynloApp({ initial }: { initial: ZynloData }) {
 				added += 1;
 			});
 			let hidden = 0;
-			const stamp = [...new Set([...(reconcilePreview.matchedIds || []), ...extraIds])];
+			const keep = new Set(used);
+			const outDays = new Set([...reconcilePreview.already, ...reconcilePreview.missing].filter((r) => r.type === "Outbound").map((r) => (r.datetime || "").slice(0, 10)).filter(Boolean));
+			const inDays = new Set([...reconcilePreview.already, ...reconcilePreview.missing].filter((r) => r.type === "Inbound").map((r) => (r.datetime || "").slice(0, 10)).filter(Boolean));
+			const recomputed = [];
+			for (const c of liveData.calls) {
+				if (c.csvCounted === false) continue;
+				if (keep.has(c.id)) continue;
+				if (c.outcome === "No Answer" || c.outcome === "Voicemail") continue;
+				const day = (c.datetime || "").slice(0, 10);
+				if (c.type === "Outbound" && outDays.has(day)) recomputed.push(c.id);
+				if (c.type === "Inbound" && inDays.has(day)) recomputed.push(c.id);
+			}
+			const hideIds = [...new Set([...extraIds, ...recomputed])];
+			const stamp = [...new Set([...(reconcilePreview.matchedIds || []), ...hideIds])];
 			await runPool(stamp, 6, async (id) => {
 				const c = liveData.calls.find((x) => x.id === id) || live.calls.find((x) => x.id === id);
 				if (!c) return;
-				const hide = extraIds.includes(id);
+				const hide = hideIds.includes(id);
 				if (!hide && c.csvCounted === true) return;
 				if (hide && c.csvCounted === false) return;
 				await saveCall({ data: {
@@ -636,18 +718,23 @@ export function ZynloApp({ initial }: { initial: ZynloData }) {
 			document.removeEventListener("visibilitychange", onVis);
 		};
 	}, [refresh]);
+	useEffect(() => {
+		if (section === "escalations") setSection("dashboard");
+	}, [section]);
 	const agentsById = useMemo(() => agentMap(data), [data]);
 	const customersById = useMemo(() => customerMap(data), [data]);
 	const clientsById = useMemo(() => clientMap(data), [data]);
 	const messages = data.messages || [];
 	const unratedRecent = useMemo(() => getUnratedRecent(data, 2), [data]);
-	const unratedGroups = useMemo(() => {
-		return groupUnratedCalls(queueScope === "mine" && meAgentId ? unratedRecent.filter((c) => c.agentId === meAgentId) : unratedRecent);
+	const unratedList = useMemo(() => {
+		return queueScope === "mine" && meAgentId ? unratedRecent.filter((c) => c.agentId === meAgentId) : unratedRecent;
 	}, [
 		unratedRecent,
 		queueScope,
 		meAgentId
 	]);
+	const escalationItems = useMemo(() => getEscalationItems(data), [data.calls]);
+	const escalationStats = useMemo(() => summarizeEscalations(escalationItems), [escalationItems]);
 	const kpis = useMemo(() => {
 		const today = todayStr();
 		const yest = yesterdayStr();
@@ -661,7 +748,6 @@ export function ZynloApp({ initial }: { initial: ZynloData }) {
 		const allCsat = allRated.length ? allRated.reduce((s, n) => s + n, 0) / allRated.length : 0;
 		const period = periodQa(data.calls, 14);
 		const csat = period.avg;
-		period.rated;
 		const todayRatedScores = todayCalls.filter(qaEligible).map(callRating).filter((n) => n != null);
 		const todayCsat = todayRatedScores.length ? todayRatedScores.reduce((s, n) => s + n, 0) / todayRatedScores.length : 0;
 		const delta = todayCalls.length - yestCalls.length;
@@ -678,14 +764,19 @@ export function ZynloApp({ initial }: { initial: ZynloData }) {
 			resolution,
 			aht,
 			csat,
-			ratedCount: period.rated,
+			ratedCount: allRated.length,
+			periodCsat: period.avg,
+			periodRated: period.rated,
 			periodCalls: period.count,
 			allCsat,
 			allRated: allRated.length,
 			todayCsat,
-			todayRatedCount: todayRatedScores.length
+			todayRatedCount: todayRatedScores.length,
+			escOpen: escalationStats.open,
+			escOverdue: escalationStats.overdue,
+			escDueToday: escalationStats.dueToday
 		};
-	}, [data.calls, messages]);
+	}, [data.calls, messages, escalationStats]);
 	const callsByDay = useMemo(() => {
 		const days = [];
 		for (let i = 13; i >= 0; i--) {
@@ -766,8 +857,12 @@ export function ZynloApp({ initial }: { initial: ZynloData }) {
 		if (q) list = list.filter((c) => {
 			const a = agentsById[c.agentId];
 			const cu = customersById[c.customerId];
-			return a?.name.toLowerCase().includes(q) || cu?.name.toLowerCase().includes(q) || cu?.phone?.includes(q) || (c.notes || "").toLowerCase().includes(q);
+			const when = (c.datetime || "").slice(0, 10);
+			const shown = formatDate(c.datetime).toLowerCase();
+			return a?.name.toLowerCase().includes(q) || cu?.name.toLowerCase().includes(q) || cu?.phone?.includes(q) || (c.notes || "").toLowerCase().includes(q) || when.includes(q) || shown.includes(q);
 		});
+		if (callDateFrom) list = list.filter((c) => (c.datetime || "").slice(0, 10) >= callDateFrom);
+		if (callDateTo) list = list.filter((c) => (c.datetime || "").slice(0, 10) <= callDateTo);
 		if (callOutcome) list = list.filter((c) => c.outcome === callOutcome);
 		if (callAgent) list = list.filter((c) => c.agentId === callAgent);
 		if (callType) list = list.filter((c) => (c.type || "Inbound") === callType);
@@ -776,6 +871,8 @@ export function ZynloApp({ initial }: { initial: ZynloData }) {
 	}, [
 		data.calls,
 		callSearch,
+		callDateFrom,
+		callDateTo,
 		callOutcome,
 		callAgent,
 		callType,
@@ -900,13 +997,15 @@ export function ZynloApp({ initial }: { initial: ZynloData }) {
 				name: a.name,
 				email: a.email,
 				role: a.role,
-				status: a.status
+				status: a.status,
+				password: ""
 			});
 		} else setAgentForm({
 			name: "",
 			email: "",
 			role: "Agent",
-			status: "Active"
+			status: "Active",
+			password: ""
 		});
 		if (kind === "customer") if (id) {
 			const c = data.customers.find((x) => x.id === id);
@@ -1098,14 +1197,21 @@ export function ZynloApp({ initial }: { initial: ZynloData }) {
 	}
 	async function onSaveAgent(e) {
 		e.preventDefault();
+		if (!editId && !agentForm.password.trim()) {
+			toast("Set a password for this agent");
+			return;
+		}
 		setBusy(true);
 		try {
+			const id = editId || Date.now().toString(36) + Math.random().toString(36).slice(2, 10);
+			const passwordHash = agentForm.password.trim() ? await hashAgentPassword(id, agentForm.password) : void 0;
 			await saveAgent({ data: {
-				id: editId || void 0,
+				id,
 				name: agentForm.name,
 				email: agentForm.email,
 				role: agentForm.role,
-				status: agentForm.status
+				status: agentForm.status,
+				passwordHash
 			} });
 			void refresh();
 			setModal(null);
@@ -1198,6 +1304,20 @@ export function ZynloApp({ initial }: { initial: ZynloData }) {
 			qaScore(c) ?? "",
 			c.notes
 		].map(escapeCsv).join(",")).join("\n"), `zynlo_calls_${date}.csv`, "text/csv");
+		else if (type === "escalations") downloadText("Logged,Due,Age days,Status,Agent,Customer,Phone,Type,Notes\n" + getEscalationItems(data).map((e) => {
+			const who = contactBits(customersById[e.customerId]);
+			return [
+				e.datetime,
+				e.due || "",
+				e.ageDays,
+				e.bucket,
+				agentsById[e.agentId]?.name || "",
+				who.name,
+				who.phone,
+				e.type,
+				e.notes
+			].map(escapeCsv).join(",");
+		}).join("\n"), `zynlo_escalations_${date}.csv`, "text/csv");
 		else if (type === "messages") downloadText("Datetime,Agent,Customer,Channel,Direction,Subject,Body,Status,Notes\n" + messages.map((m) => [
 			m.datetime,
 			agentsById[m.agentId]?.name || "",
@@ -1220,7 +1340,7 @@ export function ZynloApp({ initial }: { initial: ZynloData }) {
 				s.messages,
 				Math.round(s.resolutionRate * 100),
 				s.avgDuration.toFixed(1),
-				s.csat ? s.csat.toFixed(1) : ""
+				s.csat ? formatQa(s.csat) : ""
 			].map(escapeCsv).join(",");
 		}).join("\n"), `zynlo_agents_${date}.csv`, "text/csv");
 		else if (type === "customers") downloadText("Name,Phone,Email,Client,Company,Calls,Messages,Notes,Last Contact\n" + data.customers.map((c) => {
@@ -1253,7 +1373,7 @@ export function ZynloApp({ initial }: { initial: ZynloData }) {
 				s.escalated,
 				s.followUp,
 				s.avgDuration.toFixed(1),
-				s.avgQa ? s.avgQa.toFixed(1) : "",
+				s.avgQa ? formatQa(s.avgQa) : "",
 				s.lastActivity ? formatDate(s.lastActivity) : "",
 				s.accountNotes,
 				s.activityNotes
@@ -1331,7 +1451,7 @@ export function ZynloApp({ initial }: { initial: ZynloData }) {
 						messages: periodMsgs
 					}).length,
 					s.avgDuration.toFixed(1),
-					periodQaPack.avg ? periodQaPack.avg.toFixed(1) : ""
+					periodQaPack.avg ? formatQa(periodQaPack.avg) : ""
 				].map(escapeCsv).join(","));
 				lines.push("");
 				lines.push("CUSTOMERS");
@@ -1378,7 +1498,7 @@ export function ZynloApp({ initial }: { initial: ZynloData }) {
 					call.type,
 					call.duration,
 					call.outcome,
-					call.rating ?? "",
+					qaScore(call) ?? "",
 					call.notes
 				].map(escapeCsv).join(","));
 				if (periodCalls.length === 0) lines.push(["(none)"].map(escapeCsv).join(","));
@@ -1412,7 +1532,16 @@ export function ZynloApp({ initial }: { initial: ZynloData }) {
 			}
 			setExportClientName("");
 			setExportClientStep(false);
-		} else if (type === "json") downloadText(JSON.stringify(data, null, 2), `zynlo_backup_${date}.json`, "application/json");
+		} else if (type === "json") {
+			const safe = {
+				...data,
+				agents: data.agents.map((a) => {
+					const { passwordHash, ...rest } = a;
+					return rest;
+				})
+			};
+			downloadText(JSON.stringify(safe, null, 2), `zynlo_backup_${date}.json`, "application/json");
+		}
 		toast("Export ready");
 		setModal(null);
 	}
@@ -1449,7 +1578,13 @@ export function ZynloApp({ initial }: { initial: ZynloData }) {
 		}
 	}
 	const go = (id) => {
-		setSection(id);
+		const adminOnly = id === "agents" || id === "clients" || id === "analytics" || id === "escalations";
+		if (adminOnly && authedAgent?.role !== "Admin") {
+			setSection("dashboard");
+			setSidebarOpen(false);
+			return;
+		}
+		setSection(id === "escalations" ? "dashboard" : id);
 		setSidebarOpen(false);
 		if (id !== "customers") setSelectedCustomerId(null);
 	};
@@ -1460,6 +1595,65 @@ export function ZynloApp({ initial }: { initial: ZynloData }) {
 	todayCallsSorted.filter((c) => c.type === "Callback");
 	todayCallsSorted.slice(0, 8);
 	const recentMsgs = messages.slice().sort((a, b) => new Date(b.datetime).getTime() - new Date(a.datetime).getTime()).slice(0, 5);
+	const authedAgent = data.agents.find((a) => a.id === session?.agentId && a.passwordHash && a.passwordHash === session.proof);
+	const isAdmin = authedAgent?.role === "Admin";
+	const sessionPending = !!session && data.agents.length === 0;
+	if (!sessionPending && !authedAgent) {
+		return /* @__PURE__ */ jsxs("div", {
+			className: "flex min-h-screen items-center justify-center bg-bg px-4 text-fg",
+			children: [
+				/* @__PURE__ */ jsxs("form", {
+					onSubmit: onLogin,
+					className: "w-full max-w-sm space-y-4 rounded-2xl border border-border bg-surface p-6",
+					children: [
+						/* @__PURE__ */ jsx("img", {
+							src: "/logo-wordmark.png",
+							alt: "ZYNLO",
+							className: "mx-auto h-9 w-auto object-contain"
+						}),
+						/* @__PURE__ */ jsx("div", {
+							className: "grid grid-cols-1 gap-2",
+							children: data.agents.slice().sort((a, b) => a.name.localeCompare(b.name)).map((a) => /* @__PURE__ */ jsx("button", {
+								type: "button",
+								className: "min-h-11 rounded-xl border-2 px-4 text-sm font-semibold " + (loginAgentId === a.id ? "border-primary bg-primary text-white" : "border-border bg-bg text-fg"),
+								onClick: () => {
+									setLoginAgentId(a.id);
+									setLoginErr("");
+								},
+								children: a.name
+							}, a.id))
+						}),
+						/* @__PURE__ */ jsx("input", {
+							type: "password",
+							required: true,
+							autoComplete: "current-password",
+							placeholder: "Password",
+							className: inputClass,
+							value: loginPassword,
+							onChange: (e) => {
+								setLoginPassword(e.target.value);
+								setLoginErr("");
+							}
+						}),
+						loginErr ? /* @__PURE__ */ jsx("p", {
+							className: "text-sm font-semibold text-red-400",
+							children: loginErr
+						}) : null,
+						/* @__PURE__ */ jsx(Btn, {
+							type: "submit",
+							disabled: busy || !loginAgentId,
+							className: "w-full",
+							children: busy ? "…" : "Enter"
+						})
+					]
+				}),
+				/* @__PURE__ */ jsx(ToastStack, {
+					toasts,
+					onDismiss: (id) => setToasts((t) => t.filter((x) => x.id !== id))
+				})
+			]
+		});
+	}
 	return /* @__PURE__ */ jsxs("div", {
 		className: "flex min-h-screen bg-bg text-fg",
 		children: [
@@ -1487,7 +1681,7 @@ export function ZynloApp({ initial }: { initial: ZynloData }) {
 					}),
 					/* @__PURE__ */ jsx("nav", {
 						className: "flex flex-1 flex-col gap-1",
-						children: NAV.map((item) => {
+						children: NAV.filter((item) => isAdmin || item.id !== "agents" && item.id !== "clients" && item.id !== "analytics").map((item) => {
 							const Icon = item.icon;
 							return /* @__PURE__ */ jsxs("button", {
 								type: "button",
@@ -1501,18 +1695,18 @@ export function ZynloApp({ initial }: { initial: ZynloData }) {
 						className: "mt-4 rounded-xl border border-white/10 bg-white/5 p-3",
 						children: [/* @__PURE__ */ jsx("div", {
 							className: "mb-1 text-[10px] font-semibold uppercase tracking-wide text-white/50",
-							children: "I am"
-						}), /* @__PURE__ */ jsxs("select", {
-							className: "w-full rounded-lg border border-white/10 bg-sidebar px-2 py-2 text-sm text-white",
-							value: meAgentId,
-							onChange: (e) => setWorkingAgent(e.target.value),
-							children: [/* @__PURE__ */ jsx("option", {
-								value: "",
-								children: "Select agent"
-							}), data.agents.map((a) => /* @__PURE__ */ jsx("option", {
-								value: a.id,
-								children: a.name
-							}, a.id))]
+							children: "Signed in"
+						}), /* @__PURE__ */ jsx("div", {
+							className: "truncate text-sm font-semibold text-white",
+							children: authedAgent?.name || "Agent"
+						}), isAdmin ? /* @__PURE__ */ jsx("div", {
+							className: "mt-1 text-[11px] font-semibold uppercase tracking-wide text-primary",
+							children: "Admin"
+						}) : null, /* @__PURE__ */ jsxs("button", {
+							type: "button",
+							className: "mt-2 flex min-h-11 w-full items-center justify-center gap-2 rounded-lg border border-white/10 bg-sidebar px-2 text-sm font-semibold text-white/80 hover:border-primary hover:text-white",
+							onClick: onSignOut,
+							children: [/* @__PURE__ */ jsx(LogOut, { className: "h-4 w-4" }), "Sign out"]
 						})]
 					})
 				]
@@ -1523,7 +1717,7 @@ export function ZynloApp({ initial }: { initial: ZynloData }) {
 					section === "dashboard" && /* @__PURE__ */ jsxs(SectionView, { children: [
 						/* @__PURE__ */ jsx(Header, {
 							title: "Dashboard",
-							onExport: () => openModal("export"),
+							onExport: isAdmin ? () => openModal("export") : void 0,
 							primaryLabel: "Quick Log",
 							onPrimary: () => openModal("quick")
 						}),
@@ -1562,8 +1756,8 @@ export function ZynloApp({ initial }: { initial: ZynloData }) {
 								/* @__PURE__ */ jsx(Kpi, {
 									icon: /* @__PURE__ */ jsx(Star, { className: "h-5 w-5" }),
 									label: "Quality Assurance",
-									value: kpis.ratedCount ? `${kpis.csat.toFixed(1)}/10` : "-",
-									sub: kpis.ratedCount ? `${kpis.ratedCount} rated last 14 days${kpis.todayRatedCount ? ` · today ${kpis.todayCsat.toFixed(1)}` : ""}${kpis.allRated ? ` · all-time ${kpis.allCsat.toFixed(1)}` : ""}` : "No rated calls in last 14 days",
+									value: kpis.periodRated ? `${formatQa(kpis.csat)}/10` : kpis.ratedCount ? `${formatQa(kpis.allCsat)}/10` : "-",
+									sub: kpis.ratedCount ? `${kpis.periodRated} last 14 days · ${kpis.ratedCount} on the log ${formatQa(kpis.allCsat)}${kpis.todayRatedCount ? ` · today ${formatQa(kpis.todayCsat)} (${kpis.todayRatedCount})` : ""}` : "No rated calls",
 									accent: true
 								})
 							]
@@ -1587,16 +1781,16 @@ export function ZynloApp({ initial }: { initial: ZynloData }) {
 							className: "rounded-xl border border-primary/30 bg-purple-50 px-4 py-3 text-sm",
 							children: "Choose who you are in the sidebar to see your queue."
 						}) : null,
-						/* @__PURE__ */ jsx("div", {
-							className: "grid grid-cols-1 gap-6",
-							children: /* @__PURE__ */ jsxs(Card, { children: [/* @__PURE__ */ jsx(CardHeader, { title: `Unrated QA (${unratedGroups.reduce((n, g) => n + g.calls.length, 0)})` }), unratedGroups.length === 0 ? /* @__PURE__ */ jsx("div", {
+						/* @__PURE__ */ jsxs("div", {
+							className: "grid grid-cols-1 gap-6 lg:grid-cols-2",
+							children: [
+								/* @__PURE__ */ jsxs(Card, { children: [/* @__PURE__ */ jsx(CardHeader, { title: `Unrated QA (${unratedList.length})` }), unratedList.length === 0 ? /* @__PURE__ */ jsx("div", {
 								className: "px-5 pb-5 text-sm text-muted",
 								children: "No unrated calls in the last 2 days."
 							}) : /* @__PURE__ */ jsx("div", {
 								className: "max-h-[70vh] divide-y divide-border overflow-y-auto overscroll-contain",
-								children: unratedGroups.map((g) => {
-									const who = contactBits(customersById[g.customerId]);
-									const oldest = g.calls[0];
+								children: unratedList.map((c) => {
+									const who = contactBits(customersById[c.customerId]);
 									return /* @__PURE__ */ jsxs("div", {
 										className: "px-4 py-3",
 										children: [
@@ -1614,12 +1808,11 @@ export function ZynloApp({ initial }: { initial: ZynloData }) {
 											/* @__PURE__ */ jsxs("div", {
 												className: "mt-0.5 text-xs text-muted",
 												children: [
-													g.calls.length,
-													" unrated · ",
-													formatDate(oldest.datetime),
-													" ",
-													"· ",
-													agentsById[oldest.agentId]?.name || "Unassigned"
+													c.type || "Inbound",
+													" · ",
+													formatDate(c.datetime),
+													" · ",
+													agentsById[c.agentId]?.name || "Unassigned"
 												]
 											}),
 											/* @__PURE__ */ jsx("div", {
@@ -1639,14 +1832,29 @@ export function ZynloApp({ initial }: { initial: ZynloData }) {
 													type: "button",
 													disabled: busy,
 													className: "min-h-11 min-w-11 rounded-lg border-2 border-border bg-surface text-sm font-semibold hover:border-primary hover:text-primary disabled:opacity-50",
-													onClick: () => void patchCall(oldest.id, { rating: n }),
+													onClick: () => void patchCall(c.id, { rating: n }),
 													children: n
 												}, n))
 											})
 										]
-									}, g.key);
+									}, c.id);
 								})
-							})] })
+							})] }),
+								/* @__PURE__ */ jsxs(Card, { children: [/* @__PURE__ */ jsx(CardHeader, {
+							title: `Escalations (${queueScope === "mine" && meAgentId ? escalationItems.filter((e) => e.agentId === meAgentId).length : escalationStats.open})`
+						}), (queueScope === "mine" && meAgentId ? escalationItems.filter((e) => e.agentId === meAgentId) : escalationItems).length === 0 ? /* @__PURE__ */ jsx("div", {
+							className: "px-5 pb-5 text-sm text-muted",
+							children: "No open escalations."
+						}) : /* @__PURE__ */ jsx(EscalationList, {
+							items: queueScope === "mine" && meAgentId ? escalationItems.filter((e) => e.agentId === meAgentId) : escalationItems,
+							agents: agentsById,
+							customers: customersById,
+							busy,
+							onOpen: (id) => openModal("call", id),
+							onResolve: (id) => void patchCall(id, { outcome: "Resolved" }),
+							onDue: (id, due) => void patchCall(id, { followUpAt: due })
+						})] })
+							]
 						}),
 						/* @__PURE__ */ jsxs("div", {
 							className: "grid grid-cols-1 gap-6 lg:grid-cols-2",
@@ -1806,11 +2014,11 @@ export function ZynloApp({ initial }: { initial: ZynloData }) {
 					section === "calls" && /* @__PURE__ */ jsxs(SectionView, { children: [
 						/* @__PURE__ */ jsx(Header, {
 							title: "Call Log",
-							onExport: () => openModal("export"),
-							onReconcile: () => {
+							onExport: isAdmin ? () => openModal("export") : void 0,
+							onReconcile: isAdmin ? () => {
 								setReconcilePreview(null);
 								openModal("reconcile");
-							},
+							} : void 0,
 							primaryLabel: "Quick Log",
 							onPrimary: () => openModal("quick")
 						}),
@@ -1818,7 +2026,56 @@ export function ZynloApp({ initial }: { initial: ZynloData }) {
 							/* @__PURE__ */ jsx(SearchBox, {
 								value: callSearch,
 								onChange: setCallSearch,
-								placeholder: "Search..."
+								placeholder: "Name, phone, notes, date..."
+							}),
+							/* @__PURE__ */ jsxs("label", {
+								className: "flex min-h-11 min-w-[148px] flex-1 items-center gap-2 rounded-[10px] border border-border bg-bg px-3 text-sm sm:flex-none",
+								children: [
+									/* @__PURE__ */ jsx("span", {
+										className: "shrink-0 text-[11px] font-semibold uppercase tracking-wide text-muted",
+										children: "From"
+									}),
+									/* @__PURE__ */ jsx("input", {
+										type: "date",
+										className: "min-h-11 w-full bg-transparent text-fg outline-none",
+										value: callDateFrom,
+										onChange: (e) => setCallDateFrom(e.target.value)
+									})
+								]
+							}),
+							/* @__PURE__ */ jsxs("label", {
+								className: "flex min-h-11 min-w-[148px] flex-1 items-center gap-2 rounded-[10px] border border-border bg-bg px-3 text-sm sm:flex-none",
+								children: [
+									/* @__PURE__ */ jsx("span", {
+										className: "shrink-0 text-[11px] font-semibold uppercase tracking-wide text-muted",
+										children: "To"
+									}),
+									/* @__PURE__ */ jsx("input", {
+										type: "date",
+										className: "min-h-11 w-full bg-transparent text-fg outline-none",
+										value: callDateTo,
+										onChange: (e) => setCallDateTo(e.target.value)
+									})
+								]
+							}),
+							/* @__PURE__ */ jsx("button", {
+								type: "button",
+								className: "min-h-11 rounded-[10px] border-2 border-border bg-surface px-3 text-sm font-semibold text-fg hover:border-primary hover:text-primary",
+								onClick: () => {
+									const d = todayStr();
+									setCallDateFrom(d);
+									setCallDateTo(d);
+								},
+								children: "Today"
+							}),
+							(callDateFrom || callDateTo) && /* @__PURE__ */ jsx("button", {
+								type: "button",
+								className: "min-h-11 rounded-[10px] border-2 border-border bg-surface px-3 text-sm font-semibold text-muted hover:border-primary hover:text-primary",
+								onClick: () => {
+									setCallDateFrom("");
+									setCallDateTo("");
+								},
+								children: "Clear dates"
 							}),
 							/* @__PURE__ */ jsxs("select", {
 								className: "w-full rounded-[10px] border border-border bg-bg px-3.5 py-2.5 text-sm text-fg outline-none transition focus:border-primary focus:shadow-[0_0_0_3px_rgba(167,67,255,0.12)] w-auto min-w-[140px]",
@@ -1830,7 +2087,10 @@ export function ZynloApp({ initial }: { initial: ZynloData }) {
 								}), OUTCOMES.map((o) => /* @__PURE__ */ jsx("option", {
 									value: o,
 									children: o
-								}, o))]
+								}, o)), callOutcome && !OUTCOMES.includes(callOutcome) ? /* @__PURE__ */ jsx("option", {
+									value: callOutcome,
+									children: callOutcome
+								}) : null]
 							}),
 							/* @__PURE__ */ jsxs("select", {
 								className: "w-full rounded-[10px] border border-border bg-bg px-3.5 py-2.5 text-sm text-fg outline-none transition focus:border-primary focus:shadow-[0_0_0_3px_rgba(167,67,255,0.12)] w-auto min-w-[140px]",
@@ -1861,6 +2121,10 @@ export function ZynloApp({ initial }: { initial: ZynloData }) {
 							icon: /* @__PURE__ */ jsx(Phone, { className: "h-12 w-12" }),
 							title: "No calls yet",
 							description: "Log your first call to get started."
+						}) : filteredCalls.length === 0 ? /* @__PURE__ */ jsx(EmptyState, {
+							icon: /* @__PURE__ */ jsx(Phone, { className: "h-12 w-12" }),
+							title: "No calls on these dates",
+							description: "Try a different date or clear the date filter."
 						}) : /* @__PURE__ */ jsxs(Fragment, { children: [/* @__PURE__ */ jsx(CallsTable, {
 							calls: filteredCalls.slice(0, listLimit),
 							agents: agentsById,
@@ -1877,7 +2141,7 @@ export function ZynloApp({ initial }: { initial: ZynloData }) {
 					section === "messages" && /* @__PURE__ */ jsxs(SectionView, { children: [
 						/* @__PURE__ */ jsx(Header, {
 							title: "Messages",
-							onExport: () => openModal("export"),
+							onExport: isAdmin ? () => openModal("export") : void 0,
 							primaryLabel: "Quick Log",
 							onPrimary: () => openModal("quick")
 						}),
@@ -2052,7 +2316,7 @@ export function ZynloApp({ initial }: { initial: ZynloData }) {
 							children: `Show more · ${listLimit} of ${filteredMessages.length}`
 						}) : null] }) })
 					] }),
-					section === "agents" && /* @__PURE__ */ jsxs(SectionView, { children: [/* @__PURE__ */ jsx(Header, {
+					section === "agents" && isAdmin && /* @__PURE__ */ jsxs(SectionView, { children: [/* @__PURE__ */ jsx(Header, {
 						title: "Agents",
 						onExport: () => openModal("export"),
 						primaryLabel: "Add Agent",
@@ -2086,7 +2350,7 @@ export function ZynloApp({ initial }: { initial: ZynloData }) {
 									}),
 									/* @__PURE__ */ jsx("th", {
 										className: "px-4 py-3",
-										children: "Follow-ups"
+										children: "Escalations"
 									}),
 									/* @__PURE__ */ jsx("th", {
 										className: "px-4 py-3",
@@ -2142,7 +2406,7 @@ export function ZynloApp({ initial }: { initial: ZynloData }) {
 										}),
 										/* @__PURE__ */ jsx("td", {
 											className: "px-4 py-3 font-semibold",
-											children: s.openFollowUps
+											children: s.openEscalations
 										}),
 										/* @__PURE__ */ jsx("td", {
 											className: "px-4 py-3",
@@ -2168,13 +2432,13 @@ export function ZynloApp({ initial }: { initial: ZynloData }) {
 											className: "px-4 py-3",
 											children: s.weekRated > 0 ? /* @__PURE__ */ jsxs("div", { children: [/* @__PURE__ */ jsxs("span", {
 												className: "font-semibold text-primary",
-												children: ["★ ", s.weekQa.toFixed(1)]
+												children: ["★ ", formatQa(s.weekQa)]
 											}), /* @__PURE__ */ jsxs("div", {
 												className: "text-[11px] text-muted",
 												children: [
 													s.weekRated,
 													" this week",
-													s.lastWeekRated ? ` · last ${s.lastWeekQa.toFixed(1)}` : ""
+													s.lastWeekRated ? ` · last ${formatQa(s.lastWeekQa)}` : ""
 												]
 											})] }) : /* @__PURE__ */ jsx("span", {
 												className: "text-muted",
@@ -2210,10 +2474,10 @@ export function ZynloApp({ initial }: { initial: ZynloData }) {
 								rows: [
 									["Calls today", String(s.todayCalls)],
 									["Msgs today", String(s.todayMessages)],
-									["Follow-ups", String(s.openFollowUps)],
+									["Escalations", String(s.openEscalations)],
 									["Avg Time", formatDuration(s.todayAvgDuration)],
 									["Resolution", `${rate}%`],
-									["QA week", s.weekRated ? `★ ${s.weekQa.toFixed(1)} (${s.weekRated})` : "-"]
+									["QA week", s.weekRated ? `★ ${formatQa(s.weekQa)} (${s.weekRated})` : "-"]
 								],
 								onEdit: () => openModal("agent", a.id),
 								onDelete: () => askDelete("Delete Agent?", "Delete this agent?", () => deleteAgent({ data: { id: a.id } }).then(() => void 0))
@@ -2223,7 +2487,7 @@ export function ZynloApp({ initial }: { initial: ZynloData }) {
 					section === "customers" && /* @__PURE__ */ jsxs(SectionView, { children: [
 						/* @__PURE__ */ jsx(Header, {
 							title: "Customers",
-							onExport: () => openModal("export"),
+							onExport: isAdmin ? () => openModal("export") : void 0,
 							primaryLabel: "Add Customer",
 							onPrimary: () => openModal("customer")
 						}),
@@ -2375,7 +2639,7 @@ export function ZynloApp({ initial }: { initial: ZynloData }) {
 							children: `Show more · ${listLimit} of ${filteredCustomers.length}`
 						}) : null] }) })
 					] }),
-					section === "clients" && /* @__PURE__ */ jsxs(SectionView, { children: [
+					section === "clients" && isAdmin && /* @__PURE__ */ jsxs(SectionView, { children: [
 						/* @__PURE__ */ jsx(Header, {
 							title: "Clients",
 							onExport: () => openModal("export"),
@@ -2894,7 +3158,7 @@ export function ZynloApp({ initial }: { initial: ZynloData }) {
 							});
 						})()
 					] }),
-					section === "analytics" && /* @__PURE__ */ jsxs(SectionView, { children: [
+					section === "analytics" && isAdmin && /* @__PURE__ */ jsxs(SectionView, { children: [
 						/* @__PURE__ */ jsx(Header, {
 							title: "Analytics",
 							onExport: () => openModal("export")
@@ -3079,7 +3343,7 @@ export function ZynloApp({ initial }: { initial: ZynloData }) {
 										}),
 										/* @__PURE__ */ jsx("td", {
 											className: "px-4 py-3",
-											children: r.csat ? r.csat.toFixed(1) : "-"
+											children: r.csat ? formatQa(r.csat) : "-"
 										}),
 										/* @__PURE__ */ jsx("td", {
 											className: "px-4 py-3 font-bold",
@@ -3500,7 +3764,7 @@ export function ZynloApp({ initial }: { initial: ZynloData }) {
 											outcome: e.target.value,
 											followUpAt: e.target.value === "Follow-up" || e.target.value === "Escalated" ? f.followUpAt || dateOffsetStr(1) : f.followUpAt
 										})),
-										children: OUTCOMES.map((o) => /* @__PURE__ */ jsx("option", { children: o }, o))
+										children: (OUTCOMES.includes(callForm.outcome) ? OUTCOMES : [...OUTCOMES, callForm.outcome]).map((o) => /* @__PURE__ */ jsx("option", { children: o }, o))
 									})
 								}),
 								(callForm.outcome === "Follow-up" || callForm.outcome === "Escalated") && /* @__PURE__ */ jsx(Field, {
@@ -3804,6 +4068,22 @@ export function ZynloApp({ initial }: { initial: ZynloData }) {
 								})),
 								children: AGENT_STATUSES.map((s) => /* @__PURE__ */ jsx("option", { children: s }, s))
 							})
+						}),
+						/* @__PURE__ */ jsx(Field, {
+							label: editId ? "New password" : "Password *",
+							className: "sm:col-span-2",
+							children: /* @__PURE__ */ jsx("input", {
+								type: "password",
+								required: !editId,
+								autoComplete: "new-password",
+								className: inputClass,
+								value: agentForm.password,
+								placeholder: editId ? "Leave blank to keep" : "",
+								onChange: (e) => setAgentForm((f) => ({
+									...f,
+									password: e.target.value
+								}))
+							})
 						})
 					]
 				})
@@ -4036,14 +4316,14 @@ export function ZynloApp({ initial }: { initial: ZynloData }) {
 				}), /* @__PURE__ */ jsx(Btn, {
 					onClick: () => void applyReconcile(),
 					disabled: busy || !reconcilePreview || reconcilePreview.missing.length === 0 && !(reconcilePreview.directionFixes || []).length && !(reconcilePreview.extraIds || []).length,
-					children: busy ? "Saving" : [reconcilePreview?.missing.length ? `Add ${reconcilePreview.missing.length}` : "", (reconcilePreview?.directionFixes || []).length ? `Update ${(reconcilePreview?.directionFixes || []).length}` : ""].filter(Boolean).join(" · ") || "Apply"
+					children: busy ? "Saving" : [reconcilePreview?.missing.length ? `Add ${reconcilePreview.missing.length}` : "", (reconcilePreview?.directionFixes || []).length ? `Update ${(reconcilePreview?.directionFixes || []).length}` : "", (reconcilePreview?.extraIds || []).length ? `Hide ${(reconcilePreview.extraIds || []).length}` : ""].filter(Boolean).join(" · ") || "Apply"
 				})] }),
 				children: /* @__PURE__ */ jsxs("div", {
 					className: "space-y-4",
 					children: [
 						/* @__PURE__ */ jsx("p", {
 							className: "text-sm text-muted",
-							children: "Upload up to 10 Cloud Telecom CSVs. Incoming files stay inbound. Outgoing files stay outbound. Only answered calls are counted. Unanswered, busy, and missed are skipped. Same number, both directions, are two calls. Same direction and number within 90 seconds is one call. Existing matching calls only get handle time. Direction, notes, outcome, and QA are not changed."
+							children: "Upload up to 10 Cloud Telecom CSVs. Incoming files cap inbound. Outgoing files cap outbound. Only answered calls count. Unanswered, busy, and missed are skipped. Log totals for those days match the CSV. QA, notes, and direction on existing calls are not overwritten."
 						}),
 						/* @__PURE__ */ jsxs("label", {
 							className: "flex min-h-11 cursor-pointer flex-col items-center justify-center rounded-xl border-2 border-dashed border-primary/40 bg-purple-50 px-4 py-6 text-center",
@@ -4146,6 +4426,7 @@ export function ZynloApp({ initial }: { initial: ZynloData }) {
 										"answered · ",
 										reconcilePreview.skipped,
 										" skipped",
+										(reconcilePreview.extraIds || []).length ? ` · ${(reconcilePreview.extraIds || []).length} extra will be hidden` : "",
 										reconcilePreview.detectedDirection ? ` · ${reconcilePreview.detectedDirection.toLowerCase()}` : ""
 									]
 								}),
@@ -4220,6 +4501,11 @@ export function ZynloApp({ initial }: { initial: ZynloData }) {
 							"calls",
 							"Calls (CSV)",
 							"Call log export"
+						],
+						[
+							"escalations",
+							"Escalations (CSV)",
+							"Open escalations with due date and age"
 						],
 						[
 							"messages",
@@ -4349,7 +4635,7 @@ function CustomerTimeline({ customer, data, agents, clients, onBack, onEdit, onL
 									className: "rounded-lg bg-purple-50 p-2",
 									children: [/* @__PURE__ */ jsx("div", {
 										className: "font-bold text-primary",
-										children: stats.qaScore ? stats.qaScore.toFixed(1) : "-"
+										children: stats.qaScore ? formatQa(stats.qaScore) : "-"
 									}), /* @__PURE__ */ jsx("div", {
 										className: "text-muted",
 										children: "QA"
@@ -4515,6 +4801,99 @@ function Toolbar({ children }) {
 	return /* @__PURE__ */ jsx("div", {
 		className: "flex flex-col gap-3 sm:flex-row sm:flex-wrap",
 		children
+	});
+}
+function escTone(bucket) {
+	if (bucket === "overdue") return "outline";
+	if (bucket === "today") return "strong";
+	if (bucket === "aging") return "soft";
+	return "default";
+}
+function EscalationList({ items, agents, customers, busy, onOpen, onResolve, onDue }) {
+	return /* @__PURE__ */ jsx("div", {
+		className: "max-h-[70vh] divide-y divide-border overflow-y-auto overscroll-contain",
+		children: items.map((e) => {
+			const who = contactBits(customers[e.customerId]);
+			const label = e.bucket === "overdue" ? "Overdue" : e.bucket === "today" ? "Due today" : e.bucket === "aging" ? `${e.ageDays}d open` : "Open";
+			return /* @__PURE__ */ jsxs("div", {
+				className: "px-4 py-3 sm:px-5",
+				children: [
+					/* @__PURE__ */ jsxs("button", {
+						type: "button",
+						className: "w-full text-left",
+						onClick: () => onOpen(e.id),
+						children: [
+							/* @__PURE__ */ jsxs("div", {
+								className: "flex flex-wrap items-center gap-2",
+								children: [
+									/* @__PURE__ */ jsx("span", {
+										className: "text-sm font-semibold",
+										children: who.name
+									}),
+									who.phone ? /* @__PURE__ */ jsx("span", {
+										className: "text-sm font-medium text-primary",
+										children: who.phone
+									}) : null,
+									/* @__PURE__ */ jsx(Badge, {
+										tone: escTone(e.bucket),
+										children: label
+									}),
+									/* @__PURE__ */ jsx(Badge, {
+										tone: "soft",
+										children: e.type
+									})
+								]
+							}),
+							/* @__PURE__ */ jsxs("div", {
+								className: "mt-1 text-xs text-muted",
+								children: [
+									formatDate(e.datetime),
+									" · ",
+									agents[e.agentId]?.name || "Unassigned",
+									e.due ? ` · due ${e.due}` : " · no due date",
+									e.ageDays ? ` · ${e.ageDays}d` : ""
+								]
+							}),
+							e.notes ? /* @__PURE__ */ jsx("div", {
+								className: "mt-1 text-sm text-fg",
+								children: shortNotes(e.notes, 160)
+							}) : null
+						]
+					}),
+					/* @__PURE__ */ jsxs("div", {
+						className: "mt-2 flex flex-wrap gap-2",
+						children: [
+							/* @__PURE__ */ jsx(Btn, {
+								size: "sm",
+								disabled: busy,
+								onClick: () => onResolve(e.id),
+								children: "Resolve"
+							}),
+							/* @__PURE__ */ jsx(Btn, {
+								variant: "secondary",
+								size: "sm",
+								disabled: busy,
+								onClick: () => onDue(e.id, todayStr()),
+								children: "Due today"
+							}),
+							/* @__PURE__ */ jsx(Btn, {
+								variant: "secondary",
+								size: "sm",
+								disabled: busy,
+								onClick: () => onDue(e.id, dateOffsetStr(1)),
+								children: "Due tomorrow"
+							}),
+							/* @__PURE__ */ jsx(Btn, {
+								variant: "ghost",
+								size: "sm",
+								onClick: () => onOpen(e.id),
+								children: "Edit"
+							})
+						]
+					})
+				]
+			}, e.id);
+		})
 	});
 }
 function SearchBox({ value, onChange, placeholder }) {

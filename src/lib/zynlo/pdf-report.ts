@@ -10,6 +10,7 @@ import {
   getFollowUpItems,
   periodQa,
   qaScore,
+  formatQa,
   resolutionOf,
   todayStr,
 } from "./utils";
@@ -203,7 +204,7 @@ export async function downloadClientPdf(opts: {
     ["Messages", String(messages.length)],
     ["Resolved", `${resolution}%`],
     ["Avg handle", formatDuration(aht)],
-    ["QA score", qa.rated ? `${qa.avg.toFixed(1)} / 10` : "-"],
+    ["QA score", qa.rated ? `${formatQa(qa.avg)} / 10` : "-"],
     ["Open follow-ups", String(openFollow)],
   ];
   const gap = 3;
@@ -241,7 +242,7 @@ export async function downloadClientPdf(opts: {
     `Zynlo handled ${calls.length} call${calls.length === 1 ? "" : "s"} and ${messages.length} message${messages.length === 1 ? "" : "s"} for ${client.name} in this 14-day period.`,
     `Direction mix: ${inbound} inbound, ${outbound} outbound. Outcomes: ${resolved} resolved, ${escalated} escalated, ${follow} follow-up.`,
     qa.rated
-      ? `Quality assurance averaged ${qa.avg.toFixed(1)} from ${qa.rated} scored call${qa.rated === 1 ? "" : "s"} in the period.`
+      ? `Quality assurance averaged ${formatQa(qa.avg)} from ${qa.rated} scored call${qa.rated === 1 ? "" : "s"} in the period.`
       : "No scored quality reviews were recorded in this period.",
     openFollow
       ? `${openFollow} item${openFollow === 1 ? " remains" : "s remain"} open for follow-up.`
