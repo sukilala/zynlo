@@ -112,13 +112,7 @@ export const OUTCOMES: CallOutcome[] = [
 ];
 
 export const CALL_TYPES: CallType[] = ["Inbound", "Outbound", "Callback"];
-export const AGENT_ROLES = [
-  "Agent",
-  "Senior Agent",
-  "Team Lead",
-  "Supervisor",
-  "Admin",
-];
+export const AGENT_ROLES = ["Agent", "Senior Agent", "Team Lead", "Supervisor"];
 export const AGENT_STATUSES: AgentStatus[] = [
   "Active",
   "Away",

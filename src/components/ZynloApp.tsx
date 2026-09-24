@@ -433,9 +433,7 @@ export function ZynloApp({ initial }: { initial: ZynloData }) {
 		if (!agent || !agent.passwordHash || agent.passwordHash !== session.proof) {
 			clearAgentSession();
 			setSession(null);
-			return;
 		}
-		if (agent.role === "Admin") setQueueScope("all");
 	}, [data.agents, session]);
 	useEffect(() => {
 		refresh().catch((err) => {
@@ -1578,12 +1576,6 @@ export function ZynloApp({ initial }: { initial: ZynloData }) {
 		}
 	}
 	const go = (id) => {
-		const adminOnly = id === "agents" || id === "clients" || id === "analytics" || id === "escalations";
-		if (adminOnly && authedAgent?.role !== "Admin") {
-			setSection("dashboard");
-			setSidebarOpen(false);
-			return;
-		}
 		setSection(id === "escalations" ? "dashboard" : id);
 		setSidebarOpen(false);
 		if (id !== "customers") setSelectedCustomerId(null);
@@ -1596,7 +1588,6 @@ export function ZynloApp({ initial }: { initial: ZynloData }) {
 	todayCallsSorted.slice(0, 8);
 	const recentMsgs = messages.slice().sort((a, b) => new Date(b.datetime).getTime() - new Date(a.datetime).getTime()).slice(0, 5);
 	const authedAgent = data.agents.find((a) => a.id === session?.agentId && a.passwordHash && a.passwordHash === session.proof);
-	const isAdmin = authedAgent?.role === "Admin";
 	const sessionPending = !!session && data.agents.length === 0;
 	if (!sessionPending && !authedAgent) {
 		return /* @__PURE__ */ jsxs("div", {
@@ -1604,36 +1595,49 @@ export function ZynloApp({ initial }: { initial: ZynloData }) {
 			children: [
 				/* @__PURE__ */ jsxs("form", {
 					onSubmit: onLogin,
-					className: "w-full max-w-sm space-y-4 rounded-2xl border border-border bg-surface p-6",
+					className: "w-full max-w-sm space-y-4 rounded-2xl border border-border bg-surface p-6 shadow-[0_12px_40px_rgba(45,27,78,0.18)]",
 					children: [
 						/* @__PURE__ */ jsx("img", {
 							src: "/logo-wordmark.png",
 							alt: "ZYNLO",
 							className: "mx-auto h-9 w-auto object-contain"
 						}),
-						/* @__PURE__ */ jsx("div", {
-							className: "grid grid-cols-1 gap-2",
-							children: data.agents.slice().sort((a, b) => a.name.localeCompare(b.name)).map((a) => /* @__PURE__ */ jsx("button", {
-								type: "button",
-								className: "min-h-11 rounded-xl border-2 px-4 text-sm font-semibold " + (loginAgentId === a.id ? "border-primary bg-primary text-white" : "border-border bg-bg text-fg"),
-								onClick: () => {
-									setLoginAgentId(a.id);
+						/* @__PURE__ */ jsx("p", {
+							className: "text-center text-sm text-muted",
+							children: "Sign in to the workspace"
+						}),
+						/* @__PURE__ */ jsx(Field, {
+							label: "Agent",
+							children: /* @__PURE__ */ jsxs("select", {
+								required: true,
+								className: inputClass,
+								value: loginAgentId,
+								onChange: (e) => {
+									setLoginAgentId(e.target.value);
 									setLoginErr("");
 								},
-								children: a.name
-							}, a.id))
+								children: [/* @__PURE__ */ jsx("option", {
+									value: "",
+									children: data.agents.length ? "Select your name" : "Loading…"
+								}), data.agents.map((a) => /* @__PURE__ */ jsx("option", {
+									value: a.id,
+									children: a.name
+								}, a.id))]
+							})
 						}),
-						/* @__PURE__ */ jsx("input", {
-							type: "password",
-							required: true,
-							autoComplete: "current-password",
-							placeholder: "Password",
-							className: inputClass,
-							value: loginPassword,
-							onChange: (e) => {
-								setLoginPassword(e.target.value);
-								setLoginErr("");
-							}
+						/* @__PURE__ */ jsx(Field, {
+							label: "Password",
+							children: /* @__PURE__ */ jsx("input", {
+								type: "password",
+								required: true,
+								autoComplete: "current-password",
+								className: inputClass,
+								value: loginPassword,
+								onChange: (e) => {
+									setLoginPassword(e.target.value);
+									setLoginErr("");
+								}
+							})
 						}),
 						loginErr ? /* @__PURE__ */ jsx("p", {
 							className: "text-sm font-semibold text-red-400",
@@ -1641,9 +1645,13 @@ export function ZynloApp({ initial }: { initial: ZynloData }) {
 						}) : null,
 						/* @__PURE__ */ jsx(Btn, {
 							type: "submit",
-							disabled: busy || !loginAgentId,
+							disabled: busy || !data.agents.length,
 							className: "w-full",
-							children: busy ? "…" : "Enter"
+							children: busy ? "Checking…" : "Enter"
+						}),
+						/* @__PURE__ */ jsx("p", {
+							className: "text-center text-[11px] text-muted",
+							children: "This browser stays signed in."
 						})
 					]
 				}),
@@ -1681,7 +1689,7 @@ export function ZynloApp({ initial }: { initial: ZynloData }) {
 					}),
 					/* @__PURE__ */ jsx("nav", {
 						className: "flex flex-1 flex-col gap-1",
-						children: NAV.filter((item) => isAdmin || item.id !== "agents" && item.id !== "clients" && item.id !== "analytics").map((item) => {
+						children: NAV.map((item) => {
 							const Icon = item.icon;
 							return /* @__PURE__ */ jsxs("button", {
 								type: "button",
@@ -1699,10 +1707,7 @@ export function ZynloApp({ initial }: { initial: ZynloData }) {
 						}), /* @__PURE__ */ jsx("div", {
 							className: "truncate text-sm font-semibold text-white",
 							children: authedAgent?.name || "Agent"
-						}), isAdmin ? /* @__PURE__ */ jsx("div", {
-							className: "mt-1 text-[11px] font-semibold uppercase tracking-wide text-primary",
-							children: "Admin"
-						}) : null, /* @__PURE__ */ jsxs("button", {
+						}), /* @__PURE__ */ jsxs("button", {
 							type: "button",
 							className: "mt-2 flex min-h-11 w-full items-center justify-center gap-2 rounded-lg border border-white/10 bg-sidebar px-2 text-sm font-semibold text-white/80 hover:border-primary hover:text-white",
 							onClick: onSignOut,
@@ -1717,7 +1722,7 @@ export function ZynloApp({ initial }: { initial: ZynloData }) {
 					section === "dashboard" && /* @__PURE__ */ jsxs(SectionView, { children: [
 						/* @__PURE__ */ jsx(Header, {
 							title: "Dashboard",
-							onExport: isAdmin ? () => openModal("export") : void 0,
+							onExport: () => openModal("export"),
 							primaryLabel: "Quick Log",
 							onPrimary: () => openModal("quick")
 						}),
@@ -2014,11 +2019,11 @@ export function ZynloApp({ initial }: { initial: ZynloData }) {
 					section === "calls" && /* @__PURE__ */ jsxs(SectionView, { children: [
 						/* @__PURE__ */ jsx(Header, {
 							title: "Call Log",
-							onExport: isAdmin ? () => openModal("export") : void 0,
-							onReconcile: isAdmin ? () => {
+							onExport: () => openModal("export"),
+							onReconcile: () => {
 								setReconcilePreview(null);
 								openModal("reconcile");
-							} : void 0,
+							},
 							primaryLabel: "Quick Log",
 							onPrimary: () => openModal("quick")
 						}),
@@ -2141,7 +2146,7 @@ export function ZynloApp({ initial }: { initial: ZynloData }) {
 					section === "messages" && /* @__PURE__ */ jsxs(SectionView, { children: [
 						/* @__PURE__ */ jsx(Header, {
 							title: "Messages",
-							onExport: isAdmin ? () => openModal("export") : void 0,
+							onExport: () => openModal("export"),
 							primaryLabel: "Quick Log",
 							onPrimary: () => openModal("quick")
 						}),
@@ -2316,7 +2321,7 @@ export function ZynloApp({ initial }: { initial: ZynloData }) {
 							children: `Show more · ${listLimit} of ${filteredMessages.length}`
 						}) : null] }) })
 					] }),
-					section === "agents" && isAdmin && /* @__PURE__ */ jsxs(SectionView, { children: [/* @__PURE__ */ jsx(Header, {
+					section === "agents" && /* @__PURE__ */ jsxs(SectionView, { children: [/* @__PURE__ */ jsx(Header, {
 						title: "Agents",
 						onExport: () => openModal("export"),
 						primaryLabel: "Add Agent",
@@ -2487,7 +2492,7 @@ export function ZynloApp({ initial }: { initial: ZynloData }) {
 					section === "customers" && /* @__PURE__ */ jsxs(SectionView, { children: [
 						/* @__PURE__ */ jsx(Header, {
 							title: "Customers",
-							onExport: isAdmin ? () => openModal("export") : void 0,
+							onExport: () => openModal("export"),
 							primaryLabel: "Add Customer",
 							onPrimary: () => openModal("customer")
 						}),
@@ -2639,7 +2644,7 @@ export function ZynloApp({ initial }: { initial: ZynloData }) {
 							children: `Show more · ${listLimit} of ${filteredCustomers.length}`
 						}) : null] }) })
 					] }),
-					section === "clients" && isAdmin && /* @__PURE__ */ jsxs(SectionView, { children: [
+					section === "clients" && /* @__PURE__ */ jsxs(SectionView, { children: [
 						/* @__PURE__ */ jsx(Header, {
 							title: "Clients",
 							onExport: () => openModal("export"),
@@ -3158,7 +3163,7 @@ export function ZynloApp({ initial }: { initial: ZynloData }) {
 							});
 						})()
 					] }),
-					section === "analytics" && isAdmin && /* @__PURE__ */ jsxs(SectionView, { children: [
+					section === "analytics" && /* @__PURE__ */ jsxs(SectionView, { children: [
 						/* @__PURE__ */ jsx(Header, {
 							title: "Analytics",
 							onExport: () => openModal("export")
