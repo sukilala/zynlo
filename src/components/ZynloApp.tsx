@@ -61,6 +61,7 @@ import {
   MESSAGE_DIRECTIONS,
   MESSAGE_STATUSES,
   OUTCOMES,
+  QA_PARTS,
 } from "@/lib/zynlo/types";
 import {
   agentMap,
@@ -96,8 +97,10 @@ import {
   summarizeEscalations,
   todayStr,
   yesterdayStr,
+  weightedQa,
 } from "@/lib/zynlo/utils";
 import { downloadClientPdf } from "@/lib/zynlo/pdf-report";
+import { countLkWorkingDays } from "@/lib/zynlo/lk-workdays";
 import {
   clearAgentSession,
   hashAgentPassword,
@@ -210,18 +213,82 @@ const CHART_COLORS = [
 	"#d4b8f5",
 	"#6b4a94"
 ];
-var outcomeTone = (o) => {
+function outcomeTone(o) {
 	if (o === "Resolved") return "strong";
 	if (o === "Escalated") return "outline";
 	if (o === "Follow-up") return "soft";
 	if (o === "Answered") return "soft";
 	return "default";
-};
-var msgStatusTone = (s) => {
+}
+function msgStatusTone(s) {
 	if (s === "Closed" || s === "Replied") return "strong";
 	if (s === "Pending") return "soft";
 	return "default";
+}
+const BLANK_QA = {
+	greeting: "",
+	communication: "",
+	compliance: "",
+	resolution: "",
+	closing: ""
 };
+function qaFieldsFromCall(c) {
+	const out = { ...BLANK_QA };
+	if (!c?.qa) return out;
+	for (const part of QA_PARTS) {
+		const n = c.qa[part.key];
+		if (n) out[part.key] = String(n);
+	}
+	return out;
+}
+function packedQa(formQa) {
+	const qa = {};
+	let filled = 0;
+	for (const part of QA_PARTS) {
+		const raw = formQa?.[part.key];
+		if (raw === "" || raw == null) continue;
+		filled += 1;
+		qa[part.key] = Number(raw);
+	}
+	if (filled === 0) return { qa: null, rating: null, partial: false };
+	if (filled < QA_PARTS.length) return { qa: null, rating: null, partial: true };
+	return { qa, rating: weightedQa(qa), partial: false };
+}
+function QaScorecard({ value, onChange }) {
+	const packed = packedQa(value);
+	return /* @__PURE__ */ jsxs("div", {
+		className: "space-y-3 sm:col-span-2",
+		children: [
+			QA_PARTS.map((part) => /* @__PURE__ */ jsxs("div", {
+				children: [
+					/* @__PURE__ */ jsxs("div", {
+						className: "mb-1 flex items-baseline justify-between gap-2 text-[11px] font-semibold uppercase tracking-wide text-muted",
+						children: [
+							/* @__PURE__ */ jsx("span", { children: part.label }),
+							/* @__PURE__ */ jsx("span", { children: `${Math.round(part.weight * 100)}%` })
+						]
+					}),
+					/* @__PURE__ */ jsx("div", {
+						className: "flex flex-wrap gap-1",
+						children: [1, 2, 3, 4, 5, 6, 7, 8, 9, 10].map((n) => /* @__PURE__ */ jsx("button", {
+							type: "button",
+							className: "min-h-9 min-w-9 rounded-lg border-2 px-2 text-sm font-semibold " + (String(value[part.key]) === String(n) ? "border-primary bg-primary text-white" : "border-border bg-surface text-fg"),
+							onClick: () => onChange({
+								...value,
+								[part.key]: String(value[part.key]) === String(n) ? "" : String(n)
+							}),
+							children: n
+						}, n))
+					})
+				]
+			}, part.key)),
+			/* @__PURE__ */ jsx("div", {
+				className: "text-sm font-semibold text-primary",
+				children: packed.rating != null ? `Weighted QA ${formatQa(packed.rating)} / 10` : packed.partial ? "Score all 5 sections" : "QA later"
+			})
+		]
+	});
+}
 export function ZynloApp({ initial }: { initial: ZynloData }) {
 	const [data, setData] = useState({
 		...initial,
@@ -269,6 +336,7 @@ export function ZynloApp({ initial }: { initial: ZynloData }) {
 		duration: "3",
 		outcome: "Resolved",
 		rating: "",
+		qa: { ...BLANK_QA },
 		followUpAt: "",
 		channel: "SMS",
 		notes: ""
@@ -282,6 +350,7 @@ export function ZynloApp({ initial }: { initial: ZynloData }) {
 		duration: "3",
 		outcome: "Resolved",
 		rating: "",
+		qa: { ...BLANK_QA },
 		followUpAt: "",
 		notes: ""
 	});
@@ -736,13 +805,17 @@ export function ZynloApp({ initial }: { initial: ZynloData }) {
 	const kpis = useMemo(() => {
 		const today = todayStr();
 		const yest = yesterdayStr();
-		const todayCalls = data.calls.filter((c) => countsInCallLog(c) && c.datetime?.startsWith(today));
-		const yestCalls = data.calls.filter((c) => countsInCallLog(c) && c.datetime?.startsWith(yest));
+		const logged = data.calls.filter(countsInCallLog);
+		const todayCalls = logged.filter((c) => c.datetime?.startsWith(today));
+		const yestCalls = logged.filter((c) => c.datetime?.startsWith(yest));
+		const calls14 = filterSinceDatetime(logged, 14);
 		const todayMsgs = messages.filter((m) => m.datetime?.startsWith(today));
-		const resolution = resolutionOf(todayCalls).percent;
-		const timed = todayCalls.filter((c) => (c.duration || 0) > 0);
-		const aht = timed.length ? timed.reduce((s, c) => s + (c.duration || 0), 0) / timed.length : 0;
-		const allRated = data.calls.filter(qaEligible).map(callRating).filter((n) => n != null);
+		const msgs14 = filterSinceDatetime(messages, 14);
+		const ahtOf = (list) => {
+			const timed = list.filter((c) => (c.duration || 0) > 0);
+			return timed.length ? timed.reduce((s, c) => s + (c.duration || 0), 0) / timed.length : 0;
+		};
+		const allRated = logged.filter(qaEligible).map(callRating).filter((n) => n != null);
 		const allCsat = allRated.length ? allRated.reduce((s, n) => s + n, 0) / allRated.length : 0;
 		const period = periodQa(data.calls, 14);
 		const csat = period.avg;
@@ -752,15 +825,41 @@ export function ZynloApp({ initial }: { initial: ZynloData }) {
 		const inboundToday = todayCalls.filter(countsAsInbound).length;
 		const outboundToday = todayCalls.filter(countsAsOutbound).length;
 		const callbackToday = todayCalls.filter((c) => c.type === "Callback").length;
+		const firstDay = (list) => {
+			let min = "";
+			for (const item of list) {
+				const d = (item.datetime || "").slice(0, 10);
+				if (d.length < 10) continue;
+				if (!min || d < min) min = d;
+			}
+			return min;
+		};
+		const perDay = (n, days) => (n / Math.max(1, days)).toFixed(1);
+		const from14 = dateOffsetStr(-13);
+		const work14 = countLkWorkingDays(from14, today);
+		const callsFrom = firstDay(logged);
+		const msgsFrom = firstDay(messages);
 		return {
 			totalToday: todayCalls.length,
+			calls14: calls14.length,
+			callsAll: logged.length,
+			calls14Avg: perDay(calls14.length, work14),
+			callsAllAvg: perDay(logged.length, callsFrom ? countLkWorkingDays(callsFrom, today) : 1),
 			inboundToday,
 			outboundToday,
 			callbackToday,
 			msgsToday: todayMsgs.length,
+			msgs14: msgs14.length,
+			msgsAll: messages.length,
+			msgs14Avg: perDay(msgs14.length, work14),
+			msgsAllAvg: perDay(messages.length, msgsFrom ? countLkWorkingDays(msgsFrom, today) : 1),
 			delta,
-			resolution,
-			aht,
+			resolution: resolutionOf(todayCalls).percent,
+			resolution14: resolutionOf(calls14).percent,
+			resolutionAll: resolutionOf(logged).percent,
+			aht: ahtOf(todayCalls),
+			aht14: ahtOf(calls14),
+			ahtAll: ahtOf(logged),
 			csat,
 			ratedCount: allRated.length,
 			periodCsat: period.avg,
@@ -933,6 +1032,7 @@ export function ZynloApp({ initial }: { initial: ZynloData }) {
 				duration: "3",
 				outcome: "Resolved",
 				rating: "",
+				qa: { ...BLANK_QA },
 				followUpAt: dateOffsetStr(1),
 				channel: "SMS",
 				notes: ""
@@ -948,6 +1048,7 @@ export function ZynloApp({ initial }: { initial: ZynloData }) {
 				duration: String(c.duration),
 				outcome: c.outcome,
 				rating: c.rating != null ? String(callRating(c) ?? "") : "",
+				qa: qaFieldsFromCall(c),
 				followUpAt: c.followUpAt || "",
 				notes: c.notes || ""
 			});
@@ -960,6 +1061,7 @@ export function ZynloApp({ initial }: { initial: ZynloData }) {
 			duration: "3",
 			outcome: "Resolved",
 			rating: "",
+			qa: { ...BLANK_QA },
 			followUpAt: dateOffsetStr(1),
 			notes: ""
 		});
@@ -1051,6 +1153,12 @@ export function ZynloApp({ initial }: { initial: ZynloData }) {
 			toast("Add agent and customer first");
 			return;
 		}
+		const packed = packedQa(callForm.qa);
+		if (packed.partial) {
+			toast("Score all 5 QA sections");
+			return;
+		}
+		const existing = editId ? data.calls.find((c) => c.id === editId) : null;
 		setBusy(true);
 		try {
 			const clientId = callForm.clientId || null;
@@ -1063,8 +1171,9 @@ export function ZynloApp({ initial }: { initial: ZynloData }) {
 				type: callForm.type,
 				duration: parseFloat(callForm.duration) || 0,
 				outcome: callForm.outcome,
-				rating: callForm.rating ? parseInt(callForm.rating, 10) : null,
-				ratingScale: callForm.rating ? 10 : void 0,
+				rating: packed.qa ? packed.rating : existing?.rating ?? null,
+				ratingScale: packed.qa ? 10 : existing?.ratingScale,
+				qa: packed.qa ? packed.qa : existing?.qa ?? null,
 				notes: callForm.notes,
 				followUpAt: callForm.outcome === "Follow-up" || callForm.outcome === "Escalated" ? callForm.followUpAt || dateOffsetStr(1) : null,
 				source: editId && data.calls.find((c) => c.id === editId)?.source === "telecom" ? "telecom" : "manual",
@@ -1096,6 +1205,13 @@ export function ZynloApp({ initial }: { initial: ZynloData }) {
 			toast("Notes are required");
 			return;
 		}
+		if (quickForm.mode === "call") {
+			const packed = packedQa(quickForm.qa);
+			if (packed.partial) {
+				toast("Score all 5 QA sections");
+				return;
+			}
+		}
 		setBusy(true);
 		try {
 			let customer = findCustomerByPhone(data.customers, phone) || null;
@@ -1123,7 +1239,9 @@ export function ZynloApp({ initial }: { initial: ZynloData }) {
 					notes: ""
 				} });
 			}
-			if (quickForm.mode === "call") await saveCall({ data: {
+			if (quickForm.mode === "call") {
+				const packed = packedQa(quickForm.qa);
+				await saveCall({ data: {
 				datetime: quickForm.datetime,
 				agentId: quickForm.agentId,
 				customerId: customer.id,
@@ -1131,12 +1249,13 @@ export function ZynloApp({ initial }: { initial: ZynloData }) {
 				type: quickForm.type || "Inbound",
 				duration: parseFloat(quickForm.duration) || 0,
 				outcome: quickForm.outcome,
-				rating: quickForm.rating ? parseInt(quickForm.rating, 10) : null,
-				ratingScale: quickForm.rating ? 10 : void 0,
+				rating: packed.rating,
+				ratingScale: packed.qa ? 10 : void 0,
+				qa: packed.qa,
 				notes,
 				followUpAt: quickForm.outcome === "Follow-up" || quickForm.outcome === "Escalated" ? quickForm.followUpAt || dateOffsetStr(1) : null
 			} });
-			else await saveMessage({ data: {
+			} else await saveMessage({ data: {
 				datetime: quickForm.datetime,
 				agentId: quickForm.agentId,
 				customerId: customer.id,
@@ -1291,7 +1410,7 @@ export function ZynloApp({ initial }: { initial: ZynloData }) {
 	}
 	function exportCsv(type, clientIdOverride) {
 		const date = (/* @__PURE__ */ new Date()).toISOString().split("T")[0];
-		if (type === "calls") downloadText("Datetime,Agent,Customer,Phone,Type,Duration,Outcome,Rating,Notes\n" + data.calls.filter(countsInCallLog).map((c) => [
+		if (type === "calls") downloadText("Datetime,Agent,Customer,Phone,Type,Duration,Outcome,QA,Greeting 10%,Communication 20%,Compliance 25%,Resolution 30%,Closing 15%,Notes\n" + data.calls.filter(countsInCallLog).map((c) => [
 			c.datetime,
 			agentsById[c.agentId]?.name || "",
 			customersById[c.customerId]?.name || "",
@@ -1300,6 +1419,11 @@ export function ZynloApp({ initial }: { initial: ZynloData }) {
 			c.duration,
 			c.outcome,
 			qaScore(c) ?? "",
+			c.qa?.greeting ?? "",
+			c.qa?.communication ?? "",
+			c.qa?.compliance ?? "",
+			c.qa?.resolution ?? "",
+			c.qa?.closing ?? "",
 			c.notes
 		].map(escapeCsv).join(",")).join("\n"), `zynlo_calls_${date}.csv`, "text/csv");
 		else if (type === "escalations") downloadText("Logged,Due,Age days,Status,Agent,Customer,Phone,Type,Notes\n" + getEscalationItems(data).map((e) => {
@@ -1485,7 +1609,12 @@ export function ZynloApp({ initial }: { initial: ZynloData }) {
 					"Type",
 					"Duration (min)",
 					"Outcome",
-					"QA Rating",
+					"QA",
+					"Greeting 10%",
+					"Communication 20%",
+					"Compliance 25%",
+					"Resolution 30%",
+					"Closing 15%",
 					"Notes"
 				].map(escapeCsv).join(","));
 				for (const call of periodCalls) lines.push([
@@ -1497,6 +1626,11 @@ export function ZynloApp({ initial }: { initial: ZynloData }) {
 					call.duration,
 					call.outcome,
 					qaScore(call) ?? "",
+					call.qa?.greeting ?? "",
+					call.qa?.communication ?? "",
+					call.qa?.compliance ?? "",
+					call.qa?.resolution ?? "",
+					call.qa?.closing ?? "",
 					call.notes
 				].map(escapeCsv).join(","));
 				if (periodCalls.length === 0) lines.push(["(none)"].map(escapeCsv).join(","));
@@ -1733,38 +1867,68 @@ export function ZynloApp({ initial }: { initial: ZynloData }) {
 									icon: /* @__PURE__ */ jsx(Phone, { className: "h-5 w-5" }),
 									label: "Calls Today",
 									value: String(kpis.totalToday),
-									sub: `${kpis.delta >= 0 ? "+" : ""}${kpis.delta} vs yesterday`,
 									breakdown: [{
 										label: "Inbound",
 										value: kpis.inboundToday
 									}, {
 										label: "Outbound",
 										value: kpis.outboundToday
+									}, {
+										label: `14 days · ${kpis.calls14}`,
+										value: `${kpis.calls14Avg}/day`
+									}, {
+										label: `All · ${kpis.callsAll}`,
+										value: `${kpis.callsAllAvg}/day`
 									}]
 								}),
 								/* @__PURE__ */ jsx(Kpi, {
 									icon: /* @__PURE__ */ jsx(MessageSquare, { className: "h-5 w-5" }),
 									label: "Messages Today",
-									value: String(kpis.msgsToday)
+									value: String(kpis.msgsToday),
+									breakdown: [{
+										label: `14 days · ${kpis.msgs14}`,
+										value: `${kpis.msgs14Avg}/day`
+									}, {
+										label: `All · ${kpis.msgsAll}`,
+										value: `${kpis.msgsAllAvg}/day`
+									}]
 								}),
 								/* @__PURE__ */ jsx(Kpi, {
 									icon: /* @__PURE__ */ jsx(BarChart3, { className: "h-5 w-5" }),
 									label: "Resolution Rate",
 									value: `${kpis.resolution}%`,
-									bar: kpis.resolution
+									breakdown: [{
+										label: "14 days",
+										value: `${kpis.resolution14}%`
+									}, {
+										label: "Total",
+										value: `${kpis.resolutionAll}%`
+									}]
 								}),
 								/* @__PURE__ */ jsx(Kpi, {
 									icon: /* @__PURE__ */ jsx(ClipboardList, { className: "h-5 w-5" }),
 									label: "Avg Handle Time",
-									value: formatDuration(kpis.aht)
+									value: formatDuration(kpis.aht),
+									breakdown: [{
+										label: "14 days",
+										value: formatDuration(kpis.aht14)
+									}, {
+										label: "Total",
+										value: formatDuration(kpis.ahtAll)
+									}]
 								}),
 								/* @__PURE__ */ jsx(Kpi, {
 									icon: /* @__PURE__ */ jsx(Star, { className: "h-5 w-5" }),
 									label: "Quality Assurance",
-									value: kpis.periodRated ? `${formatQa(kpis.csat)}/10` : kpis.ratedCount ? `${formatQa(kpis.allCsat)}/10` : "-",
-									sub: kpis.ratedCount ? `${kpis.periodRated} last 14 days · ${kpis.ratedCount} on the log ${formatQa(kpis.allCsat)}${kpis.todayRatedCount ? ` · today ${formatQa(kpis.todayCsat)} (${kpis.todayRatedCount})` : ""}` : "No rated calls",
-									accent: true
-								})
+									value: kpis.periodRated ? `${formatQa(kpis.csat)}/10` : "-",
+									breakdown: [{
+										label: "14 days",
+										value: kpis.periodRated ? `${formatQa(kpis.csat)}` : "-"
+									}, {
+										label: "Total",
+										value: kpis.ratedCount ? `${formatQa(kpis.allCsat)}` : "-"
+									}]
+								}),
 							]
 						}),
 						/* @__PURE__ */ jsxs("div", {
@@ -1820,26 +1984,11 @@ export function ZynloApp({ initial }: { initial: ZynloData }) {
 													agentsById[c.agentId]?.name || "Unassigned"
 												]
 											}),
-											/* @__PURE__ */ jsx("div", {
-												className: "mt-2 flex flex-wrap gap-1.5",
-												children: [
-													10,
-													9,
-													8,
-													7,
-													6,
-													5,
-													4,
-													3,
-													2,
-													1
-												].map((n) => /* @__PURE__ */ jsx("button", {
-													type: "button",
-													disabled: busy,
-													className: "min-h-11 min-w-11 rounded-lg border-2 border-border bg-surface text-sm font-semibold hover:border-primary hover:text-primary disabled:opacity-50",
-													onClick: () => void patchCall(c.id, { rating: n }),
-													children: n
-												}, n))
+											/* @__PURE__ */ jsx("button", {
+												type: "button",
+												className: "mt-2 min-h-11 rounded-lg border-2 border-primary px-3 text-sm font-semibold text-primary",
+												onClick: () => openModal("call", c.id),
+												children: "Score QA"
 											})
 										]
 									}, c.id);
@@ -3554,33 +3703,12 @@ export function ZynloApp({ initial }: { initial: ZynloData }) {
 									}))
 								})
 							}),
-							/* @__PURE__ */ jsx(Field, {
-								label: "QA score /10",
-								className: "sm:col-span-2",
-								children: /* @__PURE__ */ jsx("div", {
-									className: "flex flex-wrap gap-2",
-									children: [
-										"",
-										"10",
-										"9",
-										"8",
-										"7",
-										"6",
-										"5",
-										"4",
-										"3",
-										"2",
-										"1"
-									].map((r) => /* @__PURE__ */ jsx("button", {
-										type: "button",
-										className: "min-h-11 min-w-11 rounded-lg border-2 px-3 py-2 text-sm font-semibold " + (quickForm.rating === r ? "border-primary bg-primary text-white" : "border-border bg-surface text-fg"),
-										onClick: () => setQuickForm((f) => ({
-											...f,
-											rating: r
-										})),
-										children: r ? r : "Later"
-									}, r || "none"))
-								})
+							/* @__PURE__ */ jsx(QaScorecard, {
+								value: quickForm.qa,
+								onChange: (qa) => setQuickForm((f) => ({
+									...f,
+									qa
+								}))
 							})
 						] }) : /* @__PURE__ */ jsx(Field, {
 							label: "Channel",
@@ -3784,32 +3912,12 @@ export function ZynloApp({ initial }: { initial: ZynloData }) {
 										}))
 									})
 								}),
-								/* @__PURE__ */ jsx(Field, {
-									label: "QA score /10",
-									children: /* @__PURE__ */ jsx("div", {
-										className: "flex flex-wrap gap-2",
-										children: [
-											"",
-											"10",
-											"9",
-											"8",
-											"7",
-											"6",
-											"5",
-											"4",
-											"3",
-											"2",
-											"1"
-										].map((r) => /* @__PURE__ */ jsx("button", {
-											type: "button",
-											className: "min-h-11 min-w-11 rounded-lg border-2 px-3 py-2 text-sm font-semibold " + (callForm.rating === r ? "border-primary bg-primary text-white" : "border-border bg-surface text-fg"),
-											onClick: () => setCallForm((f) => ({
-												...f,
-												rating: r
-											})),
-											children: r ? r : "Later"
-										}, r || "none"))
-									})
+								/* @__PURE__ */ jsx(QaScorecard, {
+									value: callForm.qa,
+									onChange: (qa) => setCallForm((f) => ({
+										...f,
+										qa
+									}))
 								})
 							]
 						}),
@@ -4780,7 +4888,7 @@ function Kpi({ icon, label, value, sub, bar, accent, breakdown }) {
 				children: sub
 			}),
 			breakdown && breakdown.length > 0 && /* @__PURE__ */ jsx("div", {
-				className: "mt-3 grid gap-2 " + (breakdown.length >= 3 ? "grid-cols-3" : "grid-cols-2"),
+				className: "mt-3 grid gap-2 " + (breakdown.length === 4 ? "grid-cols-2" : breakdown.length >= 3 ? "grid-cols-3" : "grid-cols-2"),
 				children: breakdown.map((row) => /* @__PURE__ */ jsxs("div", {
 					className: "rounded-lg bg-purple-50 px-2.5 py-2 text-center",
 					children: [/* @__PURE__ */ jsx("div", {

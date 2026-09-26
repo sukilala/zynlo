@@ -8,11 +8,25 @@ import type {
   Client,
   Customer,
   Message,
+  QaParts,
   ZynloData,
 } from "./types";
+import { QA_PARTS } from "./types";
 
 const RTDB_ROOT =
   "https://zynlo-crm-default-rtdb.firebaseio.com";
+
+function parseQa(raw: unknown): QaParts | null {
+  if (!raw || typeof raw !== "object") return null;
+  const src = raw as Record<string, unknown>;
+  const out = {} as QaParts;
+  for (const part of QA_PARTS) {
+    const n = Number(src[part.key]);
+    if (!Number.isFinite(n) || n < 1 || n > 10) return null;
+    out[part.key] = n;
+  }
+  return out;
+}
 
 const COLLECTIONS = [
   "agents",
@@ -219,6 +233,7 @@ function mapCall(
         : r.rating == null || r.rating === ""
           ? undefined
           : 5,
+    qa: parseQa(r.qa),
     notes: String(r.notes || ""),
     followUpAt: r.followUpAt ? String(r.followUpAt).slice(0, 10) : null,
     source: r.source === "telecom" ? "telecom" : "manual",
@@ -475,6 +490,7 @@ export async function firebaseUpsertCall(input: {
   outcome: string;
   rating?: number | null;
   ratingScale?: 5 | 10;
+  qa?: QaParts | null;
   notes?: string;
   followUpAt?: string | null;
   source?: "manual" | "telecom";
@@ -542,6 +558,10 @@ export async function firebaseUpsertCall(input: {
             : prevScale === 5 && rating <= 5
               ? 5
               : 10,
+    qa:
+      input.qa !== undefined
+        ? input.qa
+        : parseQa(prev?.qa),
     notes:
       input.notes != null
         ? String(input.notes).trim()

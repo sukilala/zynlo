@@ -1,4 +1,5 @@
-import type { Agent, Call, Client, Customer, Message, ZynloData } from "./types";
+import type { Agent, Call, Client, Customer, Message, QaKey, QaParts, ZynloData } from "./types";
+import { QA_PARTS } from "./types";
 
 export function formatDate(d: string | undefined | null): string {
   if (!d) return "-";
@@ -123,14 +124,31 @@ export function resolutionOf(
 
 /**
  * Stored score on a /10 scale.
+ * A full scorecard uses the weighted sections.
  * ratingScale 10 = already /10.
  * ratingScale 5 or missing + value <= 5 = old /5 score, doubled.
  * Values above 5 with no scale are already /10.
  */
+export function weightedQa(
+  qa: Partial<Record<QaKey, number | null>> | null | undefined,
+): number | null {
+  if (!qa) return null;
+  let total = 0;
+  for (const part of QA_PARTS) {
+    const n = Number(qa[part.key]);
+    if (!Number.isFinite(n) || n < 1 || n > 10) return null;
+    total += n * part.weight;
+  }
+  return Math.round(total * 100) / 100;
+}
+
 export function callRating(c: {
   rating?: number | string | null;
   ratingScale?: 5 | 10 | null;
+  qa?: Partial<Record<QaKey, number | null>> | null;
 }): number | null {
+  const weighted = weightedQa(c.qa);
+  if (weighted != null) return weighted;
   if (c.rating == null || c.rating === "") return null;
   const n = Number(c.rating);
   if (!Number.isFinite(n) || n <= 0) return null;
@@ -161,6 +179,7 @@ export function qaEligible(c: {
   rating?: number | string | null;
   ratingScale?: 5 | 10 | null;
   notes?: string | null;
+  qa?: Partial<Record<QaKey, number | null>> | null;
 }): boolean {
   if (!countsInCallLog(c)) return false;
   if (c.source === "telecom") return false;
@@ -182,6 +201,7 @@ export function qaScore(c: {
   rating?: number | string | null;
   ratingScale?: 5 | 10 | null;
   notes?: string | null;
+  qa?: Partial<Record<QaKey, number | null>> | null;
 }): number | null {
   return qaEligible(c) ? callRating(c) : null;
 }

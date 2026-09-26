@@ -218,7 +218,7 @@ export function Stars({ rating }: { rating: number | null | undefined }) {
     return <span className="text-muted">-</span>;
   }
   const n = Number(rating);
-  const label = n % 1 ? n.toFixed(1) : String(n);
+  const label = n.toFixed(2);
   return (
     <span className="font-semibold text-primary" aria-label={`${label} of 10`}>
       {label}/10
