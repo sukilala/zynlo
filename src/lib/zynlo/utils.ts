@@ -22,6 +22,15 @@ export function formatDuration(mins: number): string {
   return s > 0 ? `${m}m ${s}s` : `${m}m`;
 }
 
+/** Talk time plus 25% after-call work. Stored duration stays talk time. */
+export const ACW_FACTOR = 1.25;
+
+export function handleMinutes(talk: number | null | undefined): number {
+  const n = Number(talk) || 0;
+  if (n <= 0) return 0;
+  return Math.round(n * ACW_FACTOR * 100) / 100;
+}
+
 const COLOMBO = "Asia/Colombo";
 
 export function todayStr(): string {
@@ -268,7 +277,7 @@ export function getAgentStats(data: ZynloData, agentId: string) {
     .filter((n): n is number => n != null);
   const timedAll = agentCalls.filter((c) => (c.duration || 0) > 0);
   const avgDuration = timedAll.length
-    ? timedAll.reduce((s, c) => s + (c.duration || 0), 0) / timedAll.length
+    ? timedAll.reduce((s, c) => s + handleMinutes(c.duration), 0) / timedAll.length
     : 0;
   const csat = ratedScores.length
     ? ratedScores.reduce((s, n) => s + n, 0) / ratedScores.length
@@ -277,7 +286,7 @@ export function getAgentStats(data: ZynloData, agentId: string) {
   const todayResolved = resToday.resolved;
   const timedToday = todayCallsList.filter((c) => (c.duration || 0) > 0);
   const todayAvgDuration = timedToday.length
-    ? timedToday.reduce((s, c) => s + (c.duration || 0), 0) / timedToday.length
+    ? timedToday.reduce((s, c) => s + handleMinutes(c.duration), 0) / timedToday.length
     : 0;
   const todayRatedScores = todayCallsList
     .filter(qaEligible)
@@ -348,7 +357,7 @@ export function getCustomerStats(data: ZynloData, customerId: string) {
     avgDuration: (() => {
       const timed = custCalls.filter((c) => (c.duration || 0) > 0);
       return timed.length
-        ? timed.reduce((s, c) => s + (c.duration || 0), 0) / timed.length
+        ? timed.reduce((s, c) => s + handleMinutes(c.duration), 0) / timed.length
         : 0;
     })(),
     qaScore: (() => {
@@ -419,7 +428,7 @@ export function getClientStats(data: ZynloData, clientId: string) {
     .filter((n): n is number => n != null);
   const timed = calls.filter((c) => (c.duration || 0) > 0);
   const avgDuration = timed.length
-    ? timed.reduce((s, c) => s + (c.duration || 0), 0) / timed.length
+    ? timed.reduce((s, c) => s + handleMinutes(c.duration), 0) / timed.length
     : 0;
   const avgQa = rated.length
     ? rated.reduce((s, n) => s + n, 0) / rated.length
@@ -787,7 +796,7 @@ export function customerTimeline(
       kind: "call",
       datetime: c.datetime,
       title: `${c.type} · ${c.outcome}`,
-      detail: formatDuration(c.duration),
+      detail: formatDuration(handleMinutes(c.duration)),
       notes: c.notes || "",
       rating: qaScore(c),
     });

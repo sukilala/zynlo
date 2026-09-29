@@ -80,6 +80,7 @@ import {
   findCustomerByPhone,
   formatDate,
   formatDuration,
+  handleMinutes,
   getAgentStats,
   getClientStats,
   customersSharingPhone,
@@ -813,7 +814,7 @@ export function ZynloApp({ initial }: { initial: ZynloData }) {
 		const msgs14 = filterSinceDatetime(messages, 14);
 		const ahtOf = (list) => {
 			const timed = list.filter((c) => (c.duration || 0) > 0);
-			return timed.length ? timed.reduce((s, c) => s + (c.duration || 0), 0) / timed.length : 0;
+			return timed.length ? timed.reduce((s, c) => s + handleMinutes(c.duration), 0) / timed.length : 0;
 		};
 		const allRated = logged.filter(qaEligible).map(callRating).filter((n) => n != null);
 		const allCsat = allRated.length ? allRated.reduce((s, n) => s + n, 0) / allRated.length : 0;
@@ -926,7 +927,7 @@ export function ZynloApp({ initial }: { initial: ZynloData }) {
 			const str = dateOffsetStr(-i);
 			const d = new Date(str + "T12:00:00");
 			const dayCalls = data.calls.filter((c) => countsInCallLog(c) && c.datetime?.startsWith(str) && (c.duration || 0) > 0);
-			const avg = dayCalls.length ? dayCalls.reduce((s, c) => s + (c.duration || 0), 0) / dayCalls.length : 0;
+			const avg = dayCalls.length ? dayCalls.reduce((s, c) => s + handleMinutes(c.duration), 0) / dayCalls.length : 0;
 			days.push({
 				label: d.toLocaleDateString("en-GB", {
 					day: "numeric",
@@ -1410,13 +1411,13 @@ export function ZynloApp({ initial }: { initial: ZynloData }) {
 	}
 	function exportCsv(type, clientIdOverride) {
 		const date = (/* @__PURE__ */ new Date()).toISOString().split("T")[0];
-		if (type === "calls") downloadText("Datetime,Agent,Customer,Phone,Type,Duration,Outcome,QA,Greeting 10%,Communication 20%,Compliance 25%,Resolution 30%,Closing 15%,Notes\n" + data.calls.filter(countsInCallLog).map((c) => [
+		if (type === "calls") downloadText("Datetime,Agent,Customer,Phone,Type,Handle time (min),Outcome,QA,Greeting 10%,Communication 20%,Compliance 25%,Resolution 30%,Closing 15%,Notes\n" + data.calls.filter(countsInCallLog).map((c) => [
 			c.datetime,
 			agentsById[c.agentId]?.name || "",
 			customersById[c.customerId]?.name || "",
 			customersById[c.customerId]?.phone || "",
 			c.type,
-			c.duration,
+			handleMinutes(c.duration) || "",
 			c.outcome,
 			qaScore(c) ?? "",
 			c.qa?.greeting ?? "",
@@ -1451,7 +1452,7 @@ export function ZynloApp({ initial }: { initial: ZynloData }) {
 			m.status,
 			m.notes
 		].map(escapeCsv).join(",")).join("\n"), `zynlo_messages_${date}.csv`, "text/csv");
-		else if (type === "agents") downloadText("Name,Email,Role,Status,Total Calls,Messages,Resolution %,Avg Duration,QA Score\n" + data.agents.map((a) => {
+		else if (type === "agents") downloadText("Name,Email,Role,Status,Total Calls,Messages,Resolution %,Avg Handle (min),QA Score\n" + data.agents.map((a) => {
 			const s = getAgentStats(data, a.id);
 			return [
 				a.name,
@@ -1479,7 +1480,7 @@ export function ZynloApp({ initial }: { initial: ZynloData }) {
 				s.lastContact ? formatDate(s.lastContact) : ""
 			].map(escapeCsv).join(",");
 		}).join("\n"), `zynlo_customers_${date}.csv`, "text/csv");
-		else if (type === "clients") downloadText("Company,Industry,Phone,Email,Website,Status,Contacts,Calls,Messages,Resolved,Escalated,Follow-up,Avg Duration (min),Avg QA,Last Activity,Account Notes,Activity Notes\n" + data.clients.map((c) => {
+		else if (type === "clients") downloadText("Company,Industry,Phone,Email,Website,Status,Contacts,Calls,Messages,Resolved,Escalated,Follow-up,Avg Handle (min),Avg QA,Last Activity,Account Notes,Activity Notes\n" + data.clients.map((c) => {
 			const s = getClientStats(data, c.id);
 			return [
 				c.name,
@@ -1552,7 +1553,7 @@ export function ZynloApp({ initial }: { initial: ZynloData }) {
 					"Inbound (14d)",
 					"Outbound (14d)",
 					"Open follow-ups",
-					"Avg Duration (min)",
+					"Avg Handle (min)",
 					"Avg QA (14d)"
 				].map(escapeCsv).join(","));
 				const periodQaPack = periodQa(periodCalls, 4e3);
@@ -1607,7 +1608,7 @@ export function ZynloApp({ initial }: { initial: ZynloData }) {
 					"Customer",
 					"Phone",
 					"Type",
-					"Duration (min)",
+					"Handle time (min)",
 					"Outcome",
 					"QA",
 					"Greeting 10%",
@@ -1623,7 +1624,7 @@ export function ZynloApp({ initial }: { initial: ZynloData }) {
 					customersById[call.customerId]?.name || "",
 					customersById[call.customerId]?.phone || "",
 					call.type,
-					call.duration,
+					handleMinutes(call.duration) || "",
 					call.outcome,
 					qaScore(call) ?? "",
 					call.qa?.greeting ?? "",
@@ -1909,6 +1910,7 @@ export function ZynloApp({ initial }: { initial: ZynloData }) {
 									icon: /* @__PURE__ */ jsx(ClipboardList, { className: "h-5 w-5" }),
 									label: "Avg Handle Time",
 									value: formatDuration(kpis.aht),
+									sub: "Talk time + 25% after-call work",
 									breakdown: [{
 										label: "14 days",
 										value: formatDuration(kpis.aht14)
@@ -3174,7 +3176,7 @@ export function ZynloApp({ initial }: { initial: ZynloData }) {
 													}),
 													/* @__PURE__ */ jsx("th", {
 														className: "px-4 py-2",
-														children: "Duration"
+														children: "Handle"
 													}),
 													/* @__PURE__ */ jsx("th", {
 														className: "px-4 py-2",
@@ -3213,7 +3215,7 @@ export function ZynloApp({ initial }: { initial: ZynloData }) {
 													}),
 													/* @__PURE__ */ jsx("td", {
 														className: "px-4 py-2",
-														children: formatDuration(call.duration)
+														children: formatDuration(handleMinutes(call.duration))
 													}),
 													/* @__PURE__ */ jsx("td", {
 														className: "px-4 py-2",
@@ -3664,15 +3666,18 @@ export function ZynloApp({ initial }: { initial: ZynloData }) {
 								})
 							}),
 							/* @__PURE__ */ jsx(Field, {
-								label: "Duration (min)",
-								children: /* @__PURE__ */ jsx("input", {
+								label: "Talk time (min)",
+								children: /* @__PURE__ */ jsxs("div", { children: [/* @__PURE__ */ jsx("input", {
 									className: inputClass,
 									value: quickForm.duration,
 									onChange: (e) => setQuickForm((f) => ({
 										...f,
 										duration: e.target.value
 									}))
-								})
+								}), /* @__PURE__ */ jsx("div", {
+									className: "mt-1 text-[11px] text-muted",
+									children: `Handle time ${formatDuration(handleMinutes(parseFloat(quickForm.duration) || 0))} · includes 25% after-call work`
+								})] })
 							}),
 							/* @__PURE__ */ jsx(Field, {
 								label: "Outcome",
@@ -3872,8 +3877,8 @@ export function ZynloApp({ initial }: { initial: ZynloData }) {
 									})
 								}),
 								/* @__PURE__ */ jsx(Field, {
-									label: "Duration (mins) *",
-									children: /* @__PURE__ */ jsx("input", {
+									label: "Talk time (mins) *",
+									children: /* @__PURE__ */ jsxs("div", { children: [/* @__PURE__ */ jsx("input", {
 										type: "number",
 										min: 0,
 										step: .1,
@@ -3884,7 +3889,10 @@ export function ZynloApp({ initial }: { initial: ZynloData }) {
 											...f,
 											duration: e.target.value
 										}))
-									})
+									}), /* @__PURE__ */ jsx("div", {
+										className: "mt-1 text-[11px] text-muted",
+										children: `Handle time ${formatDuration(handleMinutes(parseFloat(callForm.duration) || 0))} · includes 25% after-call work`
+									})] })
 								}),
 								/* @__PURE__ */ jsx(Field, {
 									label: "Outcome *",
@@ -5114,7 +5122,7 @@ function CallsTable({ calls, agents, customers, onEdit, onDelete, compact }) {
 					}),
 					/* @__PURE__ */ jsx("th", {
 						className: "px-4 py-3",
-						children: "Duration"
+						children: "Handle"
 					}),
 					/* @__PURE__ */ jsx("th", {
 						className: "px-4 py-3",
@@ -5170,7 +5178,7 @@ function CallsTable({ calls, agents, customers, onEdit, onDelete, compact }) {
 						}),
 						/* @__PURE__ */ jsx("td", {
 							className: "px-4 py-3",
-							children: formatDuration(c.duration)
+							children: formatDuration(handleMinutes(c.duration))
 						}),
 						/* @__PURE__ */ jsx("td", {
 							className: "px-4 py-3",
@@ -5211,7 +5219,7 @@ function CallsTable({ calls, agents, customers, onEdit, onDelete, compact }) {
 					["Phone", cu?.phone || "-"],
 					["Agent", a?.name || "Unknown"],
 					["Type", c.type || "Inbound"],
-					["Duration", formatDuration(c.duration)],
+					["Handle time", formatDuration(handleMinutes(c.duration))],
 					["Outcome", c.outcome],
 					["QA", qaScore(c) ? `${qaScore(c)}/10` : "-"],
 					["Notes", shortNotes(c.notes, 80)]

@@ -7,6 +7,7 @@ import {
   countsInCallLog,
   formatDate,
   formatDuration,
+  handleMinutes,
   getFollowUpItems,
   periodQa,
   qaScore,
@@ -91,7 +92,7 @@ export async function downloadClientPdf(opts: {
   }).length;
   const timed = calls.filter((c) => (c.duration || 0) > 0);
   const aht = timed.length
-    ? timed.reduce((s, c) => s + (c.duration || 0), 0) / timed.length
+    ? timed.reduce((s, c) => s + handleMinutes(c.duration), 0) / timed.length
     : 0;
   const resolution = res.percent;
   const generated = new Date().toLocaleString("en-GB", {
@@ -230,7 +231,11 @@ export async function downloadClientPdf(opts: {
     doc.setTextColor(INK.r, INK.g, INK.b);
     doc.text(value, x + 5, ty + 13.5);
   });
-  y += tileH * 2 + gap + 8;
+  doc.setFont("helvetica", "normal");
+  doc.setFontSize(8);
+  doc.setTextColor(MUTED.r, MUTED.g, MUTED.b);
+  doc.text("Handle time is talk time plus 25% after-call work.", margin, y + tileH * 2 + gap + 4);
+  y += tileH * 2 + gap + 14;
 
   // Narrative
   doc.setFont("helvetica", "bold");
@@ -335,7 +340,7 @@ export async function downloadClientPdf(opts: {
         "Phone",
         "Type",
         "Agent",
-        "Duration",
+        "Handle",
         "Outcome",
         "QA",
         "Notes",
@@ -350,7 +355,7 @@ export async function downloadClientPdf(opts: {
             cu?.phone || "-",
             c.type || "Inbound",
             agentsById[c.agentId]?.name || "-",
-            formatDuration(c.duration),
+            formatDuration(handleMinutes(c.duration)),
             c.outcome,
             qaScore(c) != null ? String(qaScore(c)) : "-",
             (c.notes || "").slice(0, 90),
