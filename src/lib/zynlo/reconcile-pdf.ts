@@ -264,6 +264,7 @@ export function parseTelecomText(
   text: string,
   fileDirection: CallType | null,
 ): TelecomRow[] {
+  const generatedBy = extractGeneratedBy(text);
   const chunks = text.split(/(?=\d{4}-\d{2}-\d{2} \d{2}:\d{2}:\d{2})/);
   const rows: TelecomRow[] = [];
   for (const chunk of chunks) {
@@ -289,7 +290,7 @@ export function parseTelecomText(
       durationMin: hhmmssToMinutes(durationRaw),
       durationRaw,
       disposition: normalizeDisposition(dispMatch[1], hhmmssToMinutes(durationRaw)),
-      agentHint: "",
+      agentHint: generatedBy,
       agentId: "",
       uid: `${toIsoLocal(dtMatch[1])}|${phone}|${type}|${durationRaw}`,
     });
@@ -474,15 +475,13 @@ export function parseTelecomCsv(
   text: string,
   fileDirection: CallType | null,
 ): TelecomRow[] {
+  const generatedBy = extractGeneratedBy(text);
   const table = parseCsvRows(text);
   if (table.length < 2) return [];
   const headerAt = findHeaderRow(table);
   const headers = table[headerAt].map(normHeader);
   const queueAnswered = isQueueAnsweredCsv(headers);
-  const iDate =
-    headerIndex(headers, ["first event date", "first event"]) >= 0
-      ? headerIndex(headers, ["first event date", "first event"])
-      : headerIndex(headers, ["date", "datetime", "start time"]);
+  const iDate = headerIndex(headers, ["date", "datetime", "start time"]);
   const iCaller = headerIndex(headers, [
     "caller id",
     "clid",
@@ -500,7 +499,7 @@ export function parseTelecomCsv(
     "dialed",
   ]);
   const iDid = headerIndex(headers, ["did"]);
-  const iDisp = headerIndex(headers, ["disposition", "call status", "result", "event", "disconnection"]);
+  const iDisp = headerIndex(headers, ["disposition", "call status", "result"]);
   const iType = headerIndex(headers, ["call type", "direction", "type"]);
   const iTalk = headerIndex(headers, ["talk time", "billsec", "talk"]);
   const iDur = headerIndex(headers, ["duration", "total duration", "call duration"]);
@@ -521,21 +520,14 @@ export function parseTelecomCsv(
     "cdr id",
     "recording id",
   ]);
-  const iEvent = headerIndex(headers, ["event"]);
-  const iDisc = headerIndex(headers, ["disconnection", "disconnect"]);
-  if (iDate < 0 && iDisp < 0 && iEvent < 0) return [];
+  if (iDate < 0 && iDisp < 0) return [];
   const rows: TelecomRow[] = [];
   for (const cells of table.slice(headerAt + 1)) {
     const joined = cells.join(" ");
-    const eventCell = iEvent >= 0 ? cells[iEvent] || "" : "";
-    const discCell = iDisc >= 0 ? cells[iDisc] || "" : iDisp >= 0 ? cells[iDisp] || "" : "";
-    const eventKey = eventCell.toUpperCase().replace(/[\s_-]+/g, "");
-    const discKey = discCell.toUpperCase().replace(/[\s_-]+/g, "");
-    const unanswered =
-      eventKey.includes("RINGNOANSWER") ||
-      eventKey === "NOANSWER" ||
-      discKey.includes("NOANSWER");
-    const completed = eventKey.startsWith("COMPLETE");
+    const disp = (
+      (iDisp >= 0 ? cells[iDisp] : "") ||
+      (joined.match(/\b(NO ANSWER|NOANSWER|NOT ANSWERED|FAILED|BUSY|ANSWERED)\b/i) || [""])[0]
+    ).toUpperCase();
     const typeRaw = (iType >= 0 ? cells[iType] : "") || "";
     const kind = typeRaw.toLowerCase();
     if (kind.includes("internal")) continue;
@@ -559,14 +551,9 @@ export function parseTelecomCsv(
     const talk = parseDurationCell(iTalk >= 0 ? cells[iTalk] || "" : "");
     const total = parseDurationCell(iDur >= 0 ? cells[iDur] || "" : "");
     const inboundQueue = queueAnswered && type === "Inbound";
-    const dispCell = iDisp >= 0 ? cells[iDisp] || "" : "";
-    const disposition = unanswered
-      ? "NO ANSWER"
-      : completed
-        ? "ANSWERED"
-        : inboundQueue
-          ? "ANSWERED"
-          : normalizeDisposition(dispCell, talk.min);
+    const disposition = inboundQueue
+      ? "ANSWERED"
+      : normalizeDisposition(disp, talk.min);
     let dur = talk.min > 0 ? talk : disposition === "ANSWERED" ? total : { min: 0, raw: talk.raw || total.raw };
     if (inboundQueue && dur.min === 0 && total.min > 0) dur = total;
     if (disposition === "ANSWERED" && dur.min === 0) {
@@ -575,7 +562,7 @@ export function parseTelecomCsv(
       const extra = clocks.find((c) => !dateRaw.includes(c));
       if (extra) dur = parseDurationCell(extra);
     }
-    const agentHint = iAgent >= 0 ? cells[iAgent] || "" : "";
+    const agentHint = (iAgent >= 0 ? cells[iAgent] : "") || generatedBy;
     const uid = (iUid >= 0 ? cells[iUid] || "" : "").trim()
       || `${datetime}|${phone}|${type}|${dur.raw}`;
     rows.push({
@@ -891,29 +878,21 @@ export async function extractPdfText(file: File | ArrayBuffer): Promise<string> 
 function stampAgents(
   rows: TelecomRow[],
   file: File,
+  generatedBy: string,
   agents: Agent[],
 ): TelecomRow[] {
-  const named = agents.filter((a) => {
-    const n = a.name.trim().toLowerCase();
-    return n.length > 2 && file.name.toLowerCase().includes(n);
-  });
-  if (named.length === 1) {
-    const agent = named[0];
-    return rows.map((r) => ({
-      ...r,
-      agentId: agent.id,
-      agentHint: agent.name,
-    }));
-  }
-  const fileAgentId = detectAgentFromFilename(file.name, agents);
-  const fileHint = agents.find((a) => a.id === fileAgentId)?.name || "";
+  const fromFile = detectAgentFromFilename(file.name, agents);
+  const fromGen = matchAgentId(generatedBy, agents);
+  const fileAgentId = fromFile || fromGen;
+  const fileHint =
+    agents.find((a) => a.id === fileAgentId)?.name || generatedBy;
   return rows.map((r) => {
     const fromRow = matchAgentId(r.agentHint, agents);
-    const agentId = fromRow || (r.agentHint.trim() ? "" : fileAgentId);
+    const agentId = fromRow || fileAgentId;
     return {
       ...r,
       agentId,
-      agentHint: fromRow ? r.agentHint : r.agentHint.trim() ? r.agentHint : fileHint,
+      agentHint: r.agentHint || fileHint,
     };
   });
 }
@@ -935,7 +914,12 @@ export async function parseTelecomFile(
       (queueAnswered ? "Inbound" : null);
     const generatedBy = extractGeneratedBy(text);
     return {
-      rows: stampAgents(parseTelecomCsv(text, fileDirection), file, agents),
+      rows: stampAgents(
+        parseTelecomCsv(text, fileDirection),
+        file,
+        generatedBy,
+        agents,
+      ),
       generatedBy,
       fileDirection,
       queueAnswered,
@@ -945,7 +929,12 @@ export async function parseTelecomFile(
   const fileDirection = detectCallDirection(file.name, text);
   const generatedBy = extractGeneratedBy(text);
   return {
-    rows: stampAgents(parseTelecomText(text, fileDirection), file, agents),
+    rows: stampAgents(
+      parseTelecomText(text, fileDirection),
+      file,
+      generatedBy,
+      agents,
+    ),
     generatedBy,
     fileDirection,
   };

@@ -80,23 +80,3 @@ export function countLkWorkingDays(from: string, to: string): number {
   }
   return Math.max(1, n);
 }
-
-function subDay(iso: string): string {
-  const [y, m, d] = iso.split("-").map(Number);
-  const dt = new Date(Date.UTC(y, m - 1, d));
-  dt.setUTCDate(dt.getUTCDate() - 1);
-  return dt.toISOString().slice(0, 10);
-}
-
-/** The last `n` working days ending on `today`, oldest first. */
-export function lastLkWorkingDays(n: number, today: string): string[] {
-  const days: string[] = [];
-  let cur = today;
-  let guard = 0;
-  while (days.length < n && guard < 400) {
-    if (isLkWorkingDay(cur)) days.push(cur);
-    cur = subDay(cur);
-    guard += 1;
-  }
-  return days.reverse();
-}

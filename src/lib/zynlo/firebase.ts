@@ -532,7 +532,7 @@ export async function firebaseUpsertCall(input: {
         : (() => {
             const n = Number(input.rating);
             if (!Number.isFinite(n) || n <= 0) return null;
-            return Math.round(Math.min(10, n) * 100) / 100;
+            return Math.min(10, n);
           })();
   const prevScale =
     prev?.ratingScale === 5 || prev?.ratingScale === 10
@@ -655,7 +655,6 @@ export async function firebaseMergeCustomers(
       outcome: call.outcome,
       rating: call.rating,
       ratingScale: call.ratingScale,
-      qa: call.qa || null,
       notes: call.notes,
       followUpAt: call.followUpAt,
       source: call.source === "telecom" ? "telecom" : "manual",

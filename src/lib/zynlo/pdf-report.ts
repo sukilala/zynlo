@@ -234,7 +234,7 @@ export async function downloadClientPdf(opts: {
   doc.setFont("helvetica", "normal");
   doc.setFontSize(8);
   doc.setTextColor(MUTED.r, MUTED.g, MUTED.b);
-  doc.text("Handle time is in-call time plus 25% after-call work.", margin, y + tileH * 2 + gap + 4);
+  doc.text("Handle time is talk time plus 25% after-call work.", margin, y + tileH * 2 + gap + 4);
   y += tileH * 2 + gap + 14;
 
   // Narrative
