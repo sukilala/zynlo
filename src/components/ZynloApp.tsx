@@ -88,6 +88,7 @@ import {
   getEscalationItems,
   getFollowUpItems,
   getUnratedRecent,
+  isManualAgentCall,
   localDatetimeValue,
   periodQa,
   qaEligible,
@@ -101,7 +102,7 @@ import {
   weightedQa,
 } from "@/lib/zynlo/utils";
 import { downloadClientPdf } from "@/lib/zynlo/pdf-report";
-import { countLkWorkingDays } from "@/lib/zynlo/lk-workdays";
+import { countLkWorkingDays, lastLkWorkingDays } from "@/lib/zynlo/lk-workdays";
 import {
   clearAgentSession,
   hashAgentPassword,
@@ -191,6 +192,11 @@ const NAV = [
 		icon: Users
 	},
 	{
+		id: "qa",
+		label: "QA",
+		icon: Star
+	},
+	{
 		id: "customers",
 		label: "Customers",
 		icon: UserRound
@@ -255,8 +261,96 @@ function packedQa(formQa) {
 	if (filled < QA_PARTS.length) return { qa: null, rating: null, partial: true };
 	return { qa, rating: weightedQa(qa), partial: false };
 }
+function qaPack(list) {
+	const scores = [];
+	const cards = [];
+	for (const c of list) {
+		const score = callRating(c);
+		if (score == null) continue;
+		scores.push(score);
+		if (weightedQa(c.qa) != null) cards.push(c);
+	}
+	const parts = QA_PARTS.map((part) => {
+		let sum = 0;
+		let n = 0;
+		for (const c of cards) {
+			const v = Number(c.qa?.[part.key]);
+			if (!Number.isFinite(v)) continue;
+			sum += v;
+			n += 1;
+		}
+		return {
+			key: part.key,
+			label: part.label,
+			weight: part.weight,
+			count: n,
+			avg: n ? sum / n : null
+		};
+	});
+	return {
+		count: scores.length,
+		cards: cards.length,
+		avg: scores.length ? scores.reduce((s, n) => s + n, 0) / scores.length : null,
+		parts
+	};
+}
+function needsQaScore(c) {
+	if (!countsInCallLog(c)) return false;
+	if (c.source === "telecom") return false;
+	if (c.outcome === "Answered" || c.outcome === "No Answer" || c.outcome === "Voicemail") return false;
+	if (/^\s*telecom reconcile/i.test(c.notes || "")) return false;
+	return callRating(c) == null;
+}
+function lowestQaPart(c) {
+	if (weightedQa(c.qa) == null) return null;
+	let worst = null;
+	for (const part of QA_PARTS) {
+		const n = Number(c.qa?.[part.key]);
+		if (!Number.isFinite(n)) continue;
+		if (!worst || n < worst.score) worst = { label: part.label, score: n };
+	}
+	return worst;
+}
+function QaPeopleTable({ rows, nameLabel, showWeak }) {
+	return /* @__PURE__ */ jsx("div", {
+		className: "overflow-x-auto",
+		children: /* @__PURE__ */ jsxs("table", {
+			className: "w-full min-w-[820px] text-sm",
+			children: [/* @__PURE__ */ jsx("thead", { children: /* @__PURE__ */ jsxs("tr", {
+				className: "bg-purple-50 text-left text-[11px] font-semibold uppercase tracking-wide text-muted",
+				children: [
+					/* @__PURE__ */ jsx("th", { className: "px-4 py-3", children: nameLabel }),
+					/* @__PURE__ */ jsx("th", { className: "px-4 py-3", children: "Today" }),
+					/* @__PURE__ */ jsx("th", { className: "px-4 py-3", children: "14 days" }),
+					/* @__PURE__ */ jsx("th", { className: "px-4 py-3", children: "All" }),
+					/* @__PURE__ */ jsx("th", { className: "px-4 py-3", children: "Ratings" }),
+					showWeak ? /* @__PURE__ */ jsx("th", { className: "px-4 py-3", children: "Weakest" }) : null,
+					QA_PARTS.map((part) => /* @__PURE__ */ jsx("th", {
+						className: "px-4 py-3",
+						children: part.key === "communication" ? "Comm" : part.key === "closing" ? "Closing" : part.label.split(" and ")[0]
+					}, part.key))
+				]
+			}) }), /* @__PURE__ */ jsx("tbody", { children: rows.map((r) => /* @__PURE__ */ jsxs("tr", {
+				className: "border-t border-border",
+				children: [
+					/* @__PURE__ */ jsx("td", { className: "px-4 py-3 font-semibold", children: r.name }),
+					/* @__PURE__ */ jsx("td", { className: "px-4 py-3", children: formatQa(r.today.avg) }),
+					/* @__PURE__ */ jsx("td", { className: "px-4 py-3", children: formatQa(r.d14.avg) }),
+					/* @__PURE__ */ jsx("td", { className: "px-4 py-3 font-semibold text-primary", children: formatQa(r.all.avg) }),
+					/* @__PURE__ */ jsx("td", { className: "px-4 py-3", children: r.all.count }),
+					showWeak ? /* @__PURE__ */ jsx("td", {
+						className: "px-4 py-3 text-primary",
+						children: r.weak ? `${r.weak.label.split(" and ")[0]} ${formatQa(r.weak.avg)}` : "-"
+					}) : null,
+					r.all.parts.map((p) => /* @__PURE__ */ jsx("td", { className: "px-4 py-3", children: formatQa(p.avg) }, p.key))
+				]
+			}, r.id)) })]
+		})
+	});
+}
 function QaScorecard({ value, onChange }) {
-	const packed = packedQa(value);
+	const qa = value || BLANK_QA;
+	const packed = packedQa(qa);
 	return /* @__PURE__ */ jsxs("div", {
 		className: "space-y-3 sm:col-span-2",
 		children: [
@@ -270,13 +364,17 @@ function QaScorecard({ value, onChange }) {
 						]
 					}),
 					/* @__PURE__ */ jsx("div", {
+						className: "mb-1 text-xs font-normal normal-case tracking-normal text-muted",
+						children: part.guide
+					}),
+					/* @__PURE__ */ jsx("div", {
 						className: "flex flex-wrap gap-1",
 						children: [1, 2, 3, 4, 5, 6, 7, 8, 9, 10].map((n) => /* @__PURE__ */ jsx("button", {
 							type: "button",
-							className: "min-h-9 min-w-9 rounded-lg border-2 px-2 text-sm font-semibold " + (String(value[part.key]) === String(n) ? "border-primary bg-primary text-white" : "border-border bg-surface text-fg"),
+							className: "min-h-9 min-w-9 rounded-lg border-2 px-2 text-sm font-semibold " + (String(qa[part.key]) === String(n) ? "border-primary bg-primary text-white" : "border-border bg-surface text-fg"),
 							onClick: () => onChange({
-								...value,
-								[part.key]: String(value[part.key]) === String(n) ? "" : String(n)
+								...qa,
+								[part.key]: String(qa[part.key]) === String(n) ? "" : String(n)
 							}),
 							children: n
 						}, n))
@@ -325,6 +423,9 @@ export function ZynloApp({ initial }: { initial: ZynloData }) {
 	const [loginPassword, setLoginPassword] = useState("");
 	const [loginErr, setLoginErr] = useState("");
 	const [queueScope, setQueueScope] = useState("mine");
+	const [qaAgent, setQaAgent] = useState("");
+	const [qaFrom, setQaFrom] = useState(() => dateOffsetStr(-13));
+	const [qaTo, setQaTo] = useState(() => todayStr());
 	const [nameOverwrite, setNameOverwrite] = useState("keep");
 	const [quickForm, setQuickForm] = useState({
 		mode: "call",
@@ -617,6 +718,7 @@ export function ZynloApp({ initial }: { initial: ZynloData }) {
 					outcome: c.outcome,
 					rating: c.rating,
 					ratingScale: c.ratingScale,
+					qa: c.qa || null,
 					notes: c.notes,
 					followUpAt: c.followUpAt,
 					source: c.source === "telecom" ? "telecom" : "manual",
@@ -718,6 +820,7 @@ export function ZynloApp({ initial }: { initial: ZynloData }) {
 					outcome: c.outcome,
 					rating: c.rating,
 					ratingScale: c.ratingScale,
+					qa: c.qa || null,
 					notes: c.notes,
 					followUpAt: c.followUpAt,
 					source: c.source === "telecom" ? "telecom" : "manual",
@@ -758,6 +861,7 @@ export function ZynloApp({ initial }: { initial: ZynloData }) {
 				outcome: patch.outcome ?? c.outcome,
 				rating: patch.rating !== void 0 ? patch.rating : c.rating == null ? null : c.rating,
 				ratingScale: patch.rating !== void 0 ? 10 : c.ratingScale === 10 || c.rating != null && c.rating > 5 ? 10 : c.rating == null ? void 0 : 5,
+				qa: c.qa || null,
 				notes: c.notes,
 				followUpAt: patch.followUpAt !== void 0 ? patch.followUpAt : c.followUpAt,
 				source: c.source === "telecom" ? "telecom" : "manual",
@@ -875,6 +979,81 @@ export function ZynloApp({ initial }: { initial: ZynloData }) {
 			escDueToday: escalationStats.dueToday
 		};
 	}, [data.calls, messages, escalationStats]);
+	const qaReport = useMemo(() => {
+		const today = todayStr();
+		const from14 = dateOffsetStr(-13);
+		const scored = data.calls.filter(qaEligible);
+		const dayOf = (c) => (c.datetime || "").slice(0, 10);
+		const sliceOf = (list, from) => list.filter((c) => {
+			const d = dayOf(c);
+			return from ? d >= from && d <= today : d === today;
+		});
+		const rowsFor = (items, idOf, nameOf) => items.map((item) => {
+			const list = scored.filter((c) => idOf(c) === item.id);
+			const all = qaPack(list);
+			const weakParts = all.parts.filter((p) => p.avg != null);
+			return {
+				id: item.id,
+				name: nameOf(item),
+				all,
+				today: qaPack(sliceOf(list)),
+				d14: qaPack(sliceOf(list, from14)),
+				weak: weakParts.length ? weakParts.reduce((a, b) => a.avg <= b.avg ? a : b) : null
+			};
+		}).filter((r) => r.all.count > 0).sort((a, b) => (b.d14.avg || 0) - (a.d14.avg || 0) || (b.all.avg || 0) - (a.all.avg || 0));
+		return {
+			today: qaPack(sliceOf(scored)),
+			d14: qaPack(sliceOf(scored, from14)),
+			all: qaPack(scored),
+			agents: rowsFor(data.agents, (c) => c.agentId, (a) => a.name),
+			clients: rowsFor(data.clients, (c) => c.clientId, (c) => c.name)
+		};
+	}, [data.calls, data.agents, data.clients]);
+	const qaWork = useMemo(() => {
+		const inRange = (c) => {
+			const d = (c.datetime || "").slice(0, 10);
+			if (qaFrom && d < qaFrom) return false;
+			if (qaTo && d > qaTo) return false;
+			if (qaAgent && c.agentId !== qaAgent) return false;
+			return true;
+		};
+		const toScore = data.calls.filter((c) => needsQaScore(c) && inRange(c)).sort((a, b) => (a.datetime || "").localeCompare(b.datetime || ""));
+		const low = data.calls.filter((c) => {
+			if (!inRange(c) || !qaEligible(c)) return false;
+			const n = callRating(c);
+			return n != null && n < 7;
+		}).map((c) => ({
+			call: c,
+			score: callRating(c),
+			weak: lowestQaPart(c)
+		})).sort((a, b) => a.score - b.score || (b.call.datetime || "").localeCompare(a.call.datetime || ""));
+		return { toScore, low };
+	}, [data.calls, qaAgent, qaFrom, qaTo]);
+	const agentPrize = useMemo(() => {
+		const days = lastLkWorkingDays(12, todayStr());
+		const set = new Set(days);
+		const rows = data.agents.map((agent) => {
+			const mine = (c) => c.agentId === agent.id && isManualAgentCall(c) && set.has((c.datetime || "").slice(0, 10));
+			const calls = data.calls.filter(mine).length;
+			const messages = (data.messages || []).filter((m) => m.agentId === agent.id && set.has((m.datetime || "").slice(0, 10))).length;
+			const scores = data.calls.filter((c) => mine(c) && callRating(c) != null).map(callRating).filter((n) => n != null);
+			const qa = scores.length ? Math.round(scores.reduce((s, n) => s + n, 0) / scores.length * 100) / 100 : null;
+			const dayCount = Math.max(1, days.length);
+			const callsPerDay = Math.round(calls / dayCount * 100) / 100;
+			const messagesPerDay = Math.round(messages / dayCount * 100) / 100;
+			const perDay = Math.round((calls + messages * 0.65) / dayCount * 100) / 100;
+			const exceeds = perDay > 80 && qa != null && qa > 9;
+			return { agent, callsPerDay, messagesPerDay, perDay, qa, rated: scores.length, exceeds };
+		});
+		const ranked = rows.filter((r) => r.exceeds).sort((a, b) => b.perDay - a.perDay || (b.qa || 0) - (a.qa || 0) || a.agent.name.localeCompare(b.agent.name));
+		const winnerId = ranked[0]?.agent.id || "";
+		rows.sort((a, b) => {
+			if ((a.agent.id === winnerId) !== (b.agent.id === winnerId)) return a.agent.id === winnerId ? -1 : 1;
+			if (a.exceeds !== b.exceeds) return a.exceeds ? -1 : 1;
+			return b.perDay - a.perDay;
+		});
+		return { from: days[0] || "", to: days[days.length - 1] || "", rows, winnerId };
+	}, [data]);
 	const callsByDay = useMemo(() => {
 		const days = [];
 		for (let i = 13; i >= 0; i--) {
@@ -941,7 +1120,7 @@ export function ZynloApp({ initial }: { initial: ZynloData }) {
 	const agentRankings = useMemo(() => {
 		return data.agents.map((a) => {
 			const stats = getAgentStats(data, a.id);
-			const score = stats.total ? Math.round(stats.resolutionRate * 40 + stats.csat * 10 + Math.min(stats.total, 50) - stats.avgDuration * 2 + stats.messages * 2) : stats.messages * 5;
+			const score = stats.total ? Math.round(stats.resolutionRate * 40 + stats.csat * 10 + Math.min(stats.total, 50) - stats.avgDuration / 1.25 * 2 + stats.messages * 2) : stats.messages * 5;
 			return {
 				agent: a,
 				...stats,
@@ -1910,7 +2089,7 @@ export function ZynloApp({ initial }: { initial: ZynloData }) {
 									icon: /* @__PURE__ */ jsx(ClipboardList, { className: "h-5 w-5" }),
 									label: "Avg Handle Time",
 									value: formatDuration(kpis.aht),
-									sub: "Talk time + 25% after-call work",
+									sub: "In-call time + 25% after-call work",
 									breakdown: [{
 										label: "14 days",
 										value: formatDuration(kpis.aht14)
@@ -2477,7 +2656,16 @@ export function ZynloApp({ initial }: { initial: ZynloData }) {
 						onExport: () => openModal("export"),
 						primaryLabel: "Add Agent",
 						onPrimary: () => openModal("agent")
-					}), /* @__PURE__ */ jsx(Card, { children: data.agents.length === 0 ? /* @__PURE__ */ jsx(EmptyState, {
+					}), /* @__PURE__ */ jsx(Card, { children: /* @__PURE__ */ jsxs("div", {
+						className: "space-y-1 px-5 py-4 text-sm",
+						children: [/* @__PURE__ */ jsx("div", {
+							className: "font-semibold",
+							children: agentPrize.winnerId ? `${agentPrize.rows.find((r) => r.agent.id === agentPrize.winnerId)?.agent.name} wins 20,000 LKR` : "No winner yet"
+						}), /* @__PURE__ */ jsx("div", {
+							className: "text-muted",
+							children: `${agentPrize.from} to ${agentPrize.to}. Resolved and escalated calls that are in the CSV only. Extras are not counted. Average per working day over the last 12. More than 80 a day. A message counts as 0.65 of a call. QA above 9.00. One person.`
+						})]
+					}) }), /* @__PURE__ */ jsx(Card, { children: data.agents.length === 0 ? /* @__PURE__ */ jsx(EmptyState, {
 						icon: /* @__PURE__ */ jsx(Users, { className: "h-12 w-12" }),
 						title: "No agents yet",
 						description: "Add your first agent."
@@ -2494,46 +2682,34 @@ export function ZynloApp({ initial }: { initial: ZynloData }) {
 									}),
 									/* @__PURE__ */ jsx("th", {
 										className: "px-4 py-3",
-										children: "Role"
+										children: "Calls / day"
 									}),
 									/* @__PURE__ */ jsx("th", {
 										className: "px-4 py-3",
-										children: "Calls today"
+										children: "Messages / day"
 									}),
 									/* @__PURE__ */ jsx("th", {
 										className: "px-4 py-3",
-										children: "Msgs today"
+										children: "Score / day"
 									}),
 									/* @__PURE__ */ jsx("th", {
 										className: "px-4 py-3",
-										children: "Escalations"
+										children: "QA"
 									}),
 									/* @__PURE__ */ jsx("th", {
 										className: "px-4 py-3",
-										children: "Avg Time"
-									}),
-									/* @__PURE__ */ jsx("th", {
-										className: "px-4 py-3",
-										children: "Resolution"
-									}),
-									/* @__PURE__ */ jsx("th", {
-										className: "px-4 py-3",
-										children: "QA week"
-									}),
-									/* @__PURE__ */ jsx("th", {
-										className: "px-4 py-3",
-										children: "Status"
+										children: "Result"
 									}),
 									/* @__PURE__ */ jsx("th", {
 										className: "px-4 py-3",
 										children: "Actions"
 									})
 								]
-							}) }), /* @__PURE__ */ jsx("tbody", { children: data.agents.map((a) => {
-								const s = getAgentStats(data, a.id);
-								const rate = s.todayCalls ? Math.round(s.todayResolutionRate * 100) : 0;
+							}) }), /* @__PURE__ */ jsx("tbody", { children: agentPrize.rows.map((r) => {
+								const a = r.agent;
+								const result = a.id === agentPrize.winnerId ? "Winner · 20,000 LKR" : r.exceeds ? "Exceeded" : `${r.perDay > 80 ? "Volume over" : r.perDay === 80 ? "Volume met" : "Volume short"} · ${r.qa == null ? "No QA" : r.qa > 9 ? "QA over" : r.qa === 9 ? "QA met" : "QA short"}`;
 								return /* @__PURE__ */ jsxs("tr", {
-									className: "border-t border-border hover:bg-purple-50/60",
+									className: "border-t border-border hover:bg-purple-50/60" + (a.id === agentPrize.winnerId ? " bg-primary/10" : ""),
 									children: [
 										/* @__PURE__ */ jsx("td", {
 											className: "px-4 py-3",
@@ -2544,68 +2720,31 @@ export function ZynloApp({ initial }: { initial: ZynloData }) {
 													children: a.name
 												}), /* @__PURE__ */ jsx("div", {
 													className: "text-xs text-muted",
-													children: a.email || "-"
+													children: a.role || "-"
 												})] })]
 											})
 										}),
 										/* @__PURE__ */ jsx("td", {
+											className: "px-4 py-3 font-semibold",
+											children: r.callsPerDay.toFixed(2)
+										}),
+										/* @__PURE__ */ jsx("td", {
 											className: "px-4 py-3",
-											children: a.role
+											children: r.messagesPerDay.toFixed(2)
 										}),
 										/* @__PURE__ */ jsx("td", {
 											className: "px-4 py-3 font-semibold",
-											children: s.todayCalls
+											children: r.perDay.toFixed(2)
 										}),
 										/* @__PURE__ */ jsx("td", {
 											className: "px-4 py-3",
-											children: s.todayMessages
-										}),
-										/* @__PURE__ */ jsx("td", {
-											className: "px-4 py-3 font-semibold",
-											children: s.openEscalations
-										}),
-										/* @__PURE__ */ jsx("td", {
-											className: "px-4 py-3",
-											children: formatDuration(s.todayAvgDuration)
-										}),
-										/* @__PURE__ */ jsx("td", {
-											className: "px-4 py-3",
-											children: /* @__PURE__ */ jsxs("div", {
-												className: "flex items-center gap-2",
-												children: [/* @__PURE__ */ jsxs("span", {
-													className: "font-semibold",
-													children: [rate, "%"]
-												}), /* @__PURE__ */ jsx("div", {
-													className: "h-1.5 w-20 overflow-hidden rounded-full bg-border",
-													children: /* @__PURE__ */ jsx("div", {
-														className: "h-full rounded-full bg-primary",
-														style: { width: `${rate}%` }
-													})
-												})]
-											})
-										}),
-										/* @__PURE__ */ jsx("td", {
-											className: "px-4 py-3",
-											children: s.weekRated > 0 ? /* @__PURE__ */ jsxs("div", { children: [/* @__PURE__ */ jsxs("span", {
-												className: "font-semibold text-primary",
-												children: ["★ ", formatQa(s.weekQa)]
-											}), /* @__PURE__ */ jsxs("div", {
-												className: "text-[11px] text-muted",
-												children: [
-													s.weekRated,
-													" this week",
-													s.lastWeekRated ? ` · last ${formatQa(s.lastWeekQa)}` : ""
-												]
-											})] }) : /* @__PURE__ */ jsx("span", {
-												className: "text-muted",
-												children: "-"
-											})
+											children: r.qa == null ? "-" : `${formatQa(r.qa)} (${r.rated})`
 										}),
 										/* @__PURE__ */ jsx("td", {
 											className: "px-4 py-3",
 											children: /* @__PURE__ */ jsx(Badge, {
-												tone: a.status === "Active" ? "strong" : "soft",
-												children: a.status
+												tone: a.id === agentPrize.winnerId || r.exceeds ? "strong" : "soft",
+												children: result
 											})
 										}),
 										/* @__PURE__ */ jsx("td", {
@@ -2621,19 +2760,17 @@ export function ZynloApp({ initial }: { initial: ZynloData }) {
 						})
 					}), /* @__PURE__ */ jsx("div", {
 						className: "space-y-3 p-4 md:hidden",
-						children: data.agents.map((a) => {
-							const s = getAgentStats(data, a.id);
-							const rate = s.todayCalls ? Math.round(s.todayResolutionRate * 100) : 0;
+						children: agentPrize.rows.map((r) => {
+							const a = r.agent;
+							const result = a.id === agentPrize.winnerId ? "Winner · 20,000 LKR" : r.exceeds ? "Exceeded" : `${r.perDay > 80 ? "Volume over" : r.perDay === 80 ? "Volume met" : "Volume short"} · ${r.qa == null ? "No QA" : r.qa > 9 ? "QA over" : r.qa === 9 ? "QA met" : "QA short"}`;
 							return /* @__PURE__ */ jsx(MobileCard, {
 								title: a.name,
-								subtitle: `${a.role} · ${a.status}`,
+								subtitle: result,
 								rows: [
-									["Calls today", String(s.todayCalls)],
-									["Msgs today", String(s.todayMessages)],
-									["Escalations", String(s.openEscalations)],
-									["Avg Time", formatDuration(s.todayAvgDuration)],
-									["Resolution", `${rate}%`],
-									["QA week", s.weekRated ? `★ ${formatQa(s.weekQa)} (${s.weekRated})` : "-"]
+									["Calls / day", r.callsPerDay.toFixed(2)],
+									["Messages / day", r.messagesPerDay.toFixed(2)],
+									["Score / day", r.perDay.toFixed(2)],
+									["QA", r.qa == null ? "-" : `${formatQa(r.qa)} (${r.rated})`]
 								],
 								onEdit: () => openModal("agent", a.id),
 								onDelete: () => askDelete("Delete Agent?", "Delete this agent?", () => deleteAgent({ data: { id: a.id } }).then(() => void 0))
@@ -3314,6 +3451,193 @@ export function ZynloApp({ initial }: { initial: ZynloData }) {
 							});
 						})()
 					] }),
+					section === "qa" && /* @__PURE__ */ jsxs(SectionView, { children: [
+						/* @__PURE__ */ jsx(Header, {
+							title: "Quality Assurance",
+							onExport: () => openModal("export")
+						}),
+						/* @__PURE__ */ jsx("p", {
+							className: "text-sm text-muted",
+							children: "Same scored calls as the dashboard. Telecom and unanswered calls are not included."
+						}),
+						/* @__PURE__ */ jsxs(Toolbar, { children: [
+							/* @__PURE__ */ jsx("select", {
+								className: inputClass + " min-h-11 sm:max-w-[220px]",
+								value: qaAgent,
+								onChange: (e) => setQaAgent(e.target.value),
+								children: [/* @__PURE__ */ jsx("option", { value: "", children: "All agents" }), data.agents.map((a) => /* @__PURE__ */ jsx("option", { value: a.id, children: a.name }, a.id))]
+							}),
+							/* @__PURE__ */ jsxs("label", {
+								className: "flex min-h-11 min-w-[148px] flex-1 items-center gap-2 rounded-[10px] border border-border bg-bg px-3 text-sm sm:flex-none",
+								children: [
+									/* @__PURE__ */ jsx("span", { className: "shrink-0 text-[11px] font-semibold uppercase tracking-wide text-muted", children: "From" }),
+									/* @__PURE__ */ jsx("input", {
+										type: "date",
+										className: "min-h-11 w-full bg-transparent text-fg outline-none",
+										value: qaFrom,
+										onChange: (e) => setQaFrom(e.target.value)
+									})
+								]
+							}),
+							/* @__PURE__ */ jsxs("label", {
+								className: "flex min-h-11 min-w-[148px] flex-1 items-center gap-2 rounded-[10px] border border-border bg-bg px-3 text-sm sm:flex-none",
+								children: [
+									/* @__PURE__ */ jsx("span", { className: "shrink-0 text-[11px] font-semibold uppercase tracking-wide text-muted", children: "To" }),
+									/* @__PURE__ */ jsx("input", {
+										type: "date",
+										className: "min-h-11 w-full bg-transparent text-fg outline-none",
+										value: qaTo,
+										onChange: (e) => setQaTo(e.target.value)
+									})
+								]
+							})
+						] }),
+						/* @__PURE__ */ jsxs("div", {
+							className: "grid grid-cols-1 gap-6 lg:grid-cols-2",
+							children: [
+								/* @__PURE__ */ jsxs(Card, { children: [/* @__PURE__ */ jsx(CardHeader, { title: `To score (${qaWork.toScore.length})` }), qaWork.toScore.length === 0 ? /* @__PURE__ */ jsx("div", {
+									className: "px-5 pb-5 text-sm text-muted",
+									children: "Nothing to score in this range."
+								}) : /* @__PURE__ */ jsx("div", {
+									className: "max-h-[420px] divide-y divide-border overflow-y-auto overscroll-contain",
+									children: qaWork.toScore.map((c) => {
+										const who = contactBits(customersById[c.customerId]);
+										return /* @__PURE__ */ jsxs("div", {
+											className: "px-4 py-3",
+											children: [
+												/* @__PURE__ */ jsxs("div", {
+													className: "text-sm font-semibold",
+													children: [who.name, who.phone ? /* @__PURE__ */ jsx("span", { className: "ml-1 font-medium text-primary", children: who.phone }) : null]
+												}),
+												/* @__PURE__ */ jsxs("div", {
+													className: "mt-0.5 text-xs text-muted",
+													children: [c.type || "Inbound", " · ", formatDate(c.datetime), " · ", agentsById[c.agentId]?.name || "Unassigned"]
+												}),
+												/* @__PURE__ */ jsx("button", {
+													type: "button",
+													className: "mt-2 min-h-11 rounded-lg border-2 border-primary px-3 text-sm font-semibold text-primary",
+													onClick: () => openModal("call", c.id),
+													children: "Score"
+												})
+											]
+										}, c.id);
+									})
+								})] }),
+								/* @__PURE__ */ jsxs(Card, { children: [/* @__PURE__ */ jsx(CardHeader, { title: `Recheck under 7 (${qaWork.low.length})` }), qaWork.low.length === 0 ? /* @__PURE__ */ jsx("div", {
+									className: "px-5 pb-5 text-sm text-muted",
+									children: "No scores under 7 in this range."
+								}) : /* @__PURE__ */ jsx("div", {
+									className: "max-h-[420px] divide-y divide-border overflow-y-auto overscroll-contain",
+									children: qaWork.low.map(({ call: c, score, weak }) => {
+										const who = contactBits(customersById[c.customerId]);
+										return /* @__PURE__ */ jsxs("div", {
+											className: "px-4 py-3",
+											children: [
+												/* @__PURE__ */ jsxs("div", {
+													className: "flex items-start justify-between gap-2",
+													children: [
+														/* @__PURE__ */ jsxs("div", {
+															className: "text-sm font-semibold",
+															children: [who.name, who.phone ? /* @__PURE__ */ jsx("span", { className: "ml-1 font-medium text-primary", children: who.phone }) : null]
+														}),
+														/* @__PURE__ */ jsx("div", { className: "shrink-0 font-bold text-primary", children: formatQa(score) })
+													]
+												}),
+												/* @__PURE__ */ jsxs("div", {
+													className: "mt-0.5 text-xs text-muted",
+													children: [
+														agentsById[c.agentId]?.name || "Unassigned",
+														" · ",
+														formatDate(c.datetime),
+														weak ? ` · ${weak.label.split(" and ")[0]} ${formatQa(weak.score)}` : " · single score"
+													]
+												}),
+												/* @__PURE__ */ jsx("button", {
+													type: "button",
+													className: "mt-2 min-h-11 rounded-lg border-2 border-primary px-3 text-sm font-semibold text-primary",
+													onClick: () => openModal("call", c.id),
+													children: "Open"
+												})
+											]
+										}, c.id);
+									})
+								})] })
+							]
+						}),
+						/* @__PURE__ */ jsxs("div", {
+							className: "grid grid-cols-1 gap-3 sm:grid-cols-3",
+							children: [
+								/* @__PURE__ */ jsx(Kpi, {
+									icon: /* @__PURE__ */ jsx(Star, { className: "h-5 w-5" }),
+									label: "Today",
+									value: qaReport.today.count ? `${formatQa(qaReport.today.avg)}/10` : "-",
+									sub: `${qaReport.today.count} ratings`
+								}),
+								/* @__PURE__ */ jsx(Kpi, {
+									icon: /* @__PURE__ */ jsx(Star, { className: "h-5 w-5" }),
+									label: "14 days",
+									value: qaReport.d14.count ? `${formatQa(qaReport.d14.avg)}/10` : "-",
+									sub: `${qaReport.d14.count} ratings`
+								}),
+								/* @__PURE__ */ jsx(Kpi, {
+									icon: /* @__PURE__ */ jsx(Star, { className: "h-5 w-5" }),
+									label: "Total",
+									value: qaReport.all.count ? `${formatQa(qaReport.all.avg)}/10` : "-",
+									sub: `${qaReport.all.count} ratings · ${qaReport.all.cards} scorecards`
+								})
+							]
+						}),
+						/* @__PURE__ */ jsxs(Card, { children: [/* @__PURE__ */ jsx(CardHeader, { title: "Scorecard" }), /* @__PURE__ */ jsx("div", {
+							className: "overflow-x-auto",
+							children: /* @__PURE__ */ jsxs("table", {
+								className: "w-full min-w-[640px] text-sm",
+								children: [/* @__PURE__ */ jsx("thead", { children: /* @__PURE__ */ jsxs("tr", {
+									className: "bg-purple-50 text-left text-[11px] font-semibold uppercase tracking-wide text-muted",
+									children: ["Section", "Weight", "Today", "14 days", "All", "Scorecards"].map((h) => /* @__PURE__ */ jsx("th", { className: "px-4 py-3", children: h }, h))
+								}) }), /* @__PURE__ */ jsxs("tbody", { children: [
+									QA_PARTS.map((part, i) => /* @__PURE__ */ jsxs("tr", {
+										className: "border-t border-border",
+										children: [
+											/* @__PURE__ */ jsxs("td", {
+												className: "px-4 py-3",
+												children: [
+													/* @__PURE__ */ jsx("div", { className: "font-semibold", children: part.label }),
+													/* @__PURE__ */ jsx("div", { className: "mt-0.5 max-w-sm text-xs font-normal normal-case text-muted", children: part.guide })
+												]
+											}),
+											/* @__PURE__ */ jsx("td", { className: "px-4 py-3", children: `${Math.round(part.weight * 100)}%` }),
+											/* @__PURE__ */ jsx("td", { className: "px-4 py-3", children: formatQa(qaReport.today.parts[i].avg) }),
+											/* @__PURE__ */ jsx("td", { className: "px-4 py-3", children: formatQa(qaReport.d14.parts[i].avg) }),
+											/* @__PURE__ */ jsx("td", { className: "px-4 py-3 font-semibold text-primary", children: formatQa(qaReport.all.parts[i].avg) }),
+											/* @__PURE__ */ jsx("td", { className: "px-4 py-3", children: qaReport.all.parts[i].count })
+										]
+									}, part.key)),
+									/* @__PURE__ */ jsxs("tr", {
+										className: "border-t border-border bg-purple-50/50 font-semibold",
+										children: [
+											/* @__PURE__ */ jsx("td", { className: "px-4 py-3", children: "Weighted total" }),
+											/* @__PURE__ */ jsx("td", { className: "px-4 py-3", children: "100%" }),
+											/* @__PURE__ */ jsx("td", { className: "px-4 py-3", children: formatQa(qaReport.today.avg) }),
+											/* @__PURE__ */ jsx("td", { className: "px-4 py-3", children: formatQa(qaReport.d14.avg) }),
+											/* @__PURE__ */ jsx("td", { className: "px-4 py-3 text-primary", children: formatQa(qaReport.all.avg) }),
+											/* @__PURE__ */ jsx("td", { className: "px-4 py-3", children: qaReport.all.count })
+										]
+									})
+								] })]
+							})
+						}), qaReport.all.count > qaReport.all.cards ? /* @__PURE__ */ jsx("div", {
+							className: "border-t border-border px-5 py-3 text-xs text-muted",
+							children: "Section scores use full scorecards only. Older single ratings stay in the weighted total."
+						}) : null] }),
+						/* @__PURE__ */ jsxs(Card, { children: [/* @__PURE__ */ jsx(CardHeader, { title: "Agents" }), qaReport.agents.length === 0 ? /* @__PURE__ */ jsx("div", {
+							className: "p-5 text-sm text-muted",
+							children: "No scored calls yet."
+						}) : /* @__PURE__ */ jsx(QaPeopleTable, { rows: qaReport.agents, nameLabel: "Agent", showWeak: true })] }),
+						/* @__PURE__ */ jsxs(Card, { children: [/* @__PURE__ */ jsx(CardHeader, { title: "Clients" }), qaReport.clients.length === 0 ? /* @__PURE__ */ jsx("div", {
+							className: "p-5 text-sm text-muted",
+							children: "No scored calls yet."
+						}) : /* @__PURE__ */ jsx(QaPeopleTable, { rows: qaReport.clients, nameLabel: "Client" })] })
+					] }),
 					section === "analytics" && /* @__PURE__ */ jsxs(SectionView, { children: [
 						/* @__PURE__ */ jsx(Header, {
 							title: "Analytics",
@@ -3666,7 +3990,7 @@ export function ZynloApp({ initial }: { initial: ZynloData }) {
 								})
 							}),
 							/* @__PURE__ */ jsx(Field, {
-								label: "Talk time (min)",
+								label: "In-call time (min)",
 								children: /* @__PURE__ */ jsxs("div", { children: [/* @__PURE__ */ jsx("input", {
 									className: inputClass,
 									value: quickForm.duration,
@@ -3877,7 +4201,7 @@ export function ZynloApp({ initial }: { initial: ZynloData }) {
 									})
 								}),
 								/* @__PURE__ */ jsx(Field, {
-									label: "Talk time (mins) *",
+									label: "In-call time (mins) *",
 									children: /* @__PURE__ */ jsxs("div", { children: [/* @__PURE__ */ jsx("input", {
 										type: "number",
 										min: 0,

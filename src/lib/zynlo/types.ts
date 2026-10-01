@@ -116,12 +116,12 @@ export type QaKey =
 
 export type QaParts = Record<QaKey, number>;
 
-export const QA_PARTS: { key: QaKey; label: string; weight: number }[] = [
-  { key: "greeting", label: "Greeting and Opening", weight: 0.1 },
-  { key: "communication", label: "Communication and Soft Skills", weight: 0.2 },
-  { key: "compliance", label: "Compliance and Process Adherence", weight: 0.25 },
-  { key: "resolution", label: "Resolution and Accuracy", weight: 0.3 },
-  { key: "closing", label: "Call Closing", weight: 0.15 },
+export const QA_PARTS: { key: QaKey; label: string; weight: number; guide: string }[] = [
+  { key: "greeting", label: "Greeting and Opening", weight: 0.1, guide: "A 10 names themselves, confirms who they are speaking to, and says why they called." },
+  { key: "communication", label: "Communication and Soft Skills", weight: 0.2, guide: "A 10 is clear and calm, lets the customer finish, and does not make them repeat." },
+  { key: "compliance", label: "Compliance and Process Adherence", weight: 0.25, guide: "A 10 follows every required step and verifies the account. Nothing mandatory is skipped." },
+  { key: "resolution", label: "Resolution and Accuracy", weight: 0.3, guide: "A 10 gives the correct answer and the issue is closed before the call ends." },
+  { key: "closing", label: "Call Closing", weight: 0.15, guide: "A 10 recaps what was done, checks the customer is satisfied, then says goodbye." },
 ];
 
 export const OUTCOMES: CallOutcome[] = [

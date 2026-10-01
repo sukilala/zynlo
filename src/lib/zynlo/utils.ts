@@ -22,7 +22,7 @@ export function formatDuration(mins: number): string {
   return s > 0 ? `${m}m ${s}s` : `${m}m`;
 }
 
-/** Talk time plus 25% after-call work. Stored duration stays talk time. */
+/** In-call time plus 25% after-call work. Stored duration stays in-call time. */
 export const ACW_FACTOR = 1.25;
 
 export function handleMinutes(talk: number | null | undefined): number {
@@ -165,7 +165,18 @@ export function callRating(c: {
     c.ratingScale === 10 || n > 5
       ? n
       : n * 2;
-  return Math.round(Math.min(10, Math.max(0, out)) * 10) / 10;
+  const capped = Math.min(10, Math.max(0, out));
+  const places = c.ratingScale === 10 || n > 5 ? 100 : 10;
+  return Math.round(capped * places) / places;
+}
+
+/** Agent section only. Resolved or Escalated, and only if the call is on the CSV log. */
+export function isManualAgentCall(c: {
+  outcome?: string | null;
+  csvCounted?: boolean | null;
+}): boolean {
+  if (!countsInCallLog(c)) return false;
+  return c.outcome === "Resolved" || c.outcome === "Escalated";
 }
 
 /** Hidden CSV extras stay in Firebase but are off the log / KPIs. */
