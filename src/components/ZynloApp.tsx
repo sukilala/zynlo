@@ -1,5 +1,5 @@
 // @ts-nocheck
-import { useCallback, useEffect, useMemo, useState } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { Fragment, jsx, jsxs } from "react/jsx-runtime";
 import {
   BarChart3,
@@ -44,12 +44,17 @@ import {
   deleteCustomer as deleteCustomerRemote,
   deleteMessage as deleteMessageRemote,
   getAllData,
+  listAgentNames,
   mergeCustomers as mergeCustomersRemote,
+  resumeSession,
   saveAgent as saveAgentRemote,
   saveCall as saveCallRemote,
   saveClient as saveClientRemote,
   saveCustomer as saveCustomerRemote,
   saveMessage as saveMessageRemote,
+  signInAgent,
+  signOutAgent,
+  whoAmI,
 } from "@/lib/zynlo/api";
 import type { ZynloData } from "@/lib/zynlo/types";
 import {
@@ -104,7 +109,6 @@ import { downloadClientPdf } from "@/lib/zynlo/pdf-report";
 import { countLkWorkingDays } from "@/lib/zynlo/lk-workdays";
 import {
   clearAgentSession,
-  hashAgentPassword,
   readAgentSession,
   writeAgentSession,
 } from "@/lib/zynlo/session";
@@ -315,13 +319,13 @@ export function ZynloApp({ initial }: { initial: ZynloData }) {
 	const [customerSearch, setCustomerSearch] = useState("");
 	const [clientSearch, setClientSearch] = useState("");
 	const [analyticsTab, setAnalyticsTab] = useState("performance");
-	const [exportClientStep, setExportClientStep] = useState(false);
+	const [exportClientStep, setExportClientStep] = useState(null);
 	const [exportClientName, setExportClientName] = useState("");
 	const [selectedClientId, setSelectedClientId] = useState(null);
 	const [selectedCustomerId, setSelectedCustomerId] = useState(null);
 	const [meAgentId, setMeAgentId] = useState("");
-	const [session, setSession] = useState(readAgentSession);
-	const [loginAgentId, setLoginAgentId] = useState(readLastAgentId);
+	const [session, setSession] = useState(null);
+	const [loginAgentId, setLoginAgentId] = useState("");
 	const [loginPassword, setLoginPassword] = useState("");
 	const [loginErr, setLoginErr] = useState("");
 	const [queueScope, setQueueScope] = useState("mine");
@@ -401,8 +405,11 @@ export function ZynloApp({ initial }: { initial: ZynloData }) {
 		}]);
 		setTimeout(() => setToasts((t) => t.filter((x) => x.id !== id)), 3200);
 	}, []);
+	const authEpoch = useRef(0);
 	const refresh = useCallback(async () => {
+		const epoch = authEpoch.current;
 		const next = await getAllData();
+		if (epoch !== authEpoch.current) return next;
 		const mapped = {
 			...next,
 			messages: next.messages || []
@@ -469,18 +476,24 @@ export function ZynloApp({ initial }: { initial: ZynloData }) {
 	const deleteCustomer = async (args) => {
 		const id = args?.data?.id;
 		await deleteCustomerRemote(args);
-		if (id) setData((d) => ({
-			...d,
-			customers: d.customers.filter((c) => c.id !== id)
-		}));
+		if (id) {
+			setData((d) => ({
+				...d,
+				customers: d.customers.filter((c) => c.id !== id)
+			}));
+			setSelectedCustomerId((cur) => cur === id ? null : cur);
+		}
 	};
 	const deleteClient = async (args) => {
 		const id = args?.data?.id;
 		await deleteClientRemote(args);
-		if (id) setData((d) => ({
-			...d,
-			clients: d.clients.filter((c) => c.id !== id)
-		}));
+		if (id) {
+			setData((d) => ({
+				...d,
+				clients: d.clients.filter((c) => c.id !== id)
+			}));
+			setSelectedClientId((cur) => cur === id ? null : cur);
+		}
 	};
 	const deleteAgent = async (args) => {
 		const id = args?.data?.id;
@@ -498,17 +511,42 @@ export function ZynloApp({ initial }: { initial: ZynloData }) {
 		else if (pool[0]?.id) setMeAgentId(pool[0].id);
 	}, [data.agents, session]);
 	useEffect(() => {
-		if (!session || data.agents.length === 0) return;
-		const agent = data.agents.find((a) => a.id === session.agentId);
-		if (!agent || !agent.passwordHash || agent.passwordHash !== session.proof) {
-			clearAgentSession();
-			setSession(null);
-		}
-	}, [data.agents, session]);
-	useEffect(() => {
-		refresh().catch((err) => {
-			toast(err instanceof Error ? err.message : "Could not load data");
-		});
+		const epoch = ++authEpoch.current;
+		let dead = false;
+		const stale = () => dead || epoch !== authEpoch.current;
+		const last = readLastAgentId();
+		if (last) setLoginAgentId((cur) => cur || last);
+		(async () => {
+			const saved = readAgentSession();
+			try {
+				if (saved?.proof && saved.proof !== "ok") {
+					const resumed = await resumeSession({ data: { agentId: saved.agentId, proof: saved.proof } });
+					if (stale()) return;
+					writeAgentSession(resumed.agentId, "ok");
+					setSession({ agentId: resumed.agentId, proof: "ok" });
+				} else {
+					const who = await whoAmI();
+					if (stale()) return;
+					if (!who.agentId) throw new Error("Sign in required");
+					writeAgentSession(who.agentId, "ok");
+					setSession({ agentId: who.agentId, proof: "ok" });
+				}
+				if (!stale()) await refresh();
+			} catch {
+				if (stale()) return;
+				clearAgentSession();
+				setSession(null);
+				try {
+					const names = await listAgentNames();
+					if (!stale()) setData((d) => ({ ...d, agents: names }));
+				} catch (err) {
+					if (!stale()) toast(err instanceof Error ? err.message : "Could not load");
+				}
+			}
+		})();
+		return () => {
+			dead = true;
+		};
 	}, [refresh, toast]);
 	useEffect(() => {
 		setListLimit(40);
@@ -523,44 +561,63 @@ export function ZynloApp({ initial }: { initial: ZynloData }) {
 	}
 	async function onLogin(e) {
 		e.preventDefault();
-		const agent = data.agents.find((a) => a.id === loginAgentId);
-		if (!agent) {
+		const picked = new FormData(e.currentTarget);
+		const agentId = String(picked.get("agentId") || loginAgentId || "").trim();
+		const password = String(picked.get("password") || "");
+		if (!agentId) {
 			setLoginErr("Select your name");
 			return;
 		}
-		if (!loginPassword.trim()) {
+		if (!password.trim()) {
 			setLoginErr("Enter your password");
 			return;
 		}
 		setBusy(true);
 		setLoginErr("");
 		try {
-			const proof = await hashAgentPassword(agent.id, loginPassword);
-			if (!agent.passwordHash || proof !== agent.passwordHash) {
-				setLoginErr("Wrong password");
-				return;
+			const result = await signInAgent({ data: { agentId, password } });
+			authEpoch.current += 1;
+			writeAgentSession(result.agentId, "ok");
+			setSession({ agentId: result.agentId, proof: "ok" });
+			setWorkingAgent(result.agentId);
+			try {
+				await refresh();
+			} catch (err) {
+				toast(err instanceof Error ? err.message : "Could not load data");
 			}
-			writeAgentSession(agent.id, proof);
-			setSession({
-				agentId: agent.id,
-				proof
-			});
-			setWorkingAgent(agent.id);
-			setLoginPassword("");
+		} catch (err) {
+			const message = err instanceof Error ? err.message : "";
+			setLoginErr(message && message.length < 160 ? message : "Wrong password");
 		} finally {
 			setBusy(false);
 		}
 	}
 	function onSignOut() {
+		authEpoch.current += 1;
+		void signOutAgent();
 		clearAgentSession();
 		setSession(null);
+		setData((d) => ({
+			...d,
+			calls: [],
+			customers: [],
+			clients: [],
+			messages: [],
+			agents: d.agents.map((a) => ({
+				id: a.id,
+				name: a.name,
+				email: "",
+				role: a.role,
+				status: a.status
+			}))
+		}));
 		setLoginAgentId(meAgentId || readLastAgentId());
 		setLoginPassword("");
 		setLoginErr("");
 	}
 	async function onReconcileFiles(files) {
 		const list = files.slice(0, 10);
-		if (list.length === 0) return;
+		if (list.length === 0 || busy) return;
 		setBusy(true);
 		try {
 			const allRows = [];
@@ -688,6 +745,7 @@ export function ZynloApp({ initial }: { initial: ZynloData }) {
 			});
 			let hidden = 0;
 			const keep = new Set(used);
+			const dir = reconcilePreview.detectedDirection;
 			const outDays = new Set([...reconcilePreview.already, ...reconcilePreview.missing].filter((r) => r.type === "Outbound").map((r) => (r.datetime || "").slice(0, 10)).filter(Boolean));
 			const inDays = new Set([...reconcilePreview.already, ...reconcilePreview.missing].filter((r) => r.type === "Inbound").map((r) => (r.datetime || "").slice(0, 10)).filter(Boolean));
 			const recomputed = [];
@@ -696,8 +754,8 @@ export function ZynloApp({ initial }: { initial: ZynloData }) {
 				if (keep.has(c.id)) continue;
 				if (c.outcome === "No Answer" || c.outcome === "Voicemail") continue;
 				const day = (c.datetime || "").slice(0, 10);
-				if (c.type === "Outbound" && outDays.has(day)) recomputed.push(c.id);
-				if (c.type === "Inbound" && inDays.has(day)) recomputed.push(c.id);
+				if ((!dir || dir === "Outbound") && c.type === "Outbound" && outDays.has(day)) recomputed.push(c.id);
+				if ((!dir || dir === "Inbound") && c.type === "Inbound" && inDays.has(day)) recomputed.push(c.id);
 			}
 			const hideIds = [...new Set([...extraIds, ...recomputed])];
 			const stamp = [...new Set([...(reconcilePreview.matchedIds || []), ...hideIds])];
@@ -786,9 +844,6 @@ export function ZynloApp({ initial }: { initial: ZynloData }) {
 			document.removeEventListener("visibilitychange", onVis);
 		};
 	}, [refresh]);
-	useEffect(() => {
-		if (section === "escalations") setSection("dashboard");
-	}, [section]);
 	const agentsById = useMemo(() => agentMap(data), [data]);
 	const customersById = useMemo(() => customerMap(data), [data]);
 	const clientsById = useMemo(() => clientMap(data), [data]);
@@ -1017,7 +1072,7 @@ export function ZynloApp({ initial }: { initial: ZynloData }) {
 	}, [data.clients, clientSearch]);
 	function openModal(kind, id) {
 		setEditId(id || null);
-		setExportClientStep(false);
+		setExportClientStep(null);
 		if (kind === "quick") {
 			const defaultAgent = pickAgent();
 			const prefClient = id || selectedClientId || "";
@@ -1178,7 +1233,7 @@ export function ZynloApp({ initial }: { initial: ZynloData }) {
 				notes: callForm.notes,
 				followUpAt: callForm.outcome === "Follow-up" || callForm.outcome === "Escalated" ? callForm.followUpAt || dateOffsetStr(1) : null,
 				source: editId && data.calls.find((c) => c.id === editId)?.source === "telecom" ? "telecom" : "manual",
-				csvCounted: editId ? data.calls.find((c) => c.id === editId)?.csvCounted : void 0
+				csvCounted: editId ? data.calls.find((c) => c.id === editId)?.csvCounted !== false : true
 			} });
 			setWorkingAgent(callForm.agentId);
 			void refresh();
@@ -1254,7 +1309,9 @@ export function ZynloApp({ initial }: { initial: ZynloData }) {
 				ratingScale: packed.qa ? 10 : void 0,
 				qa: packed.qa,
 				notes,
-				followUpAt: quickForm.outcome === "Follow-up" || quickForm.outcome === "Escalated" ? quickForm.followUpAt || dateOffsetStr(1) : null
+				followUpAt: quickForm.outcome === "Follow-up" || quickForm.outcome === "Escalated" ? quickForm.followUpAt || dateOffsetStr(1) : null,
+				source: "manual",
+				csvCounted: true
 			} });
 			} else await saveMessage({ data: {
 				datetime: quickForm.datetime,
@@ -1322,14 +1379,13 @@ export function ZynloApp({ initial }: { initial: ZynloData }) {
 		setBusy(true);
 		try {
 			const id = editId || Date.now().toString(36) + Math.random().toString(36).slice(2, 10);
-			const passwordHash = agentForm.password.trim() ? await hashAgentPassword(id, agentForm.password) : void 0;
 			await saveAgent({ data: {
 				id,
 				name: agentForm.name,
 				email: agentForm.email,
 				role: agentForm.role,
 				status: agentForm.status,
-				passwordHash
+				password: agentForm.password.trim() || void 0
 			} });
 			void refresh();
 			setModal(null);
@@ -1407,7 +1463,6 @@ export function ZynloApp({ initial }: { initial: ZynloData }) {
 				}
 			}
 		});
-		setModal("confirm");
 	}
 	function exportCsv(type, clientIdOverride) {
 		const date = (/* @__PURE__ */ new Date()).toISOString().split("T")[0];
@@ -1664,7 +1719,7 @@ export function ZynloApp({ initial }: { initial: ZynloData }) {
 				downloadText(lines.join("\n"), `zynlo_client_report_${safe}_${date}.csv`, "text/csv");
 			}
 			setExportClientName("");
-			setExportClientStep(false);
+			setExportClientStep(null);
 		} else if (type === "json") {
 			const safe = {
 				...data,
@@ -1702,7 +1757,7 @@ export function ZynloApp({ initial }: { initial: ZynloData }) {
 			}
 			toast(clientIds.length === 1 ? "PDF ready" : `${clientIds.length} PDFs ready`);
 			setExportClientName("");
-			setExportClientStep(false);
+			setExportClientStep(null);
 			setModal(null);
 		} catch (err) {
 			toast(err instanceof Error ? err.message : "PDF failed");
@@ -1711,9 +1766,10 @@ export function ZynloApp({ initial }: { initial: ZynloData }) {
 		}
 	}
 	const go = (id) => {
-		setSection(id === "escalations" ? "dashboard" : id);
+		setSection(id);
 		setSidebarOpen(false);
 		if (id !== "customers") setSelectedCustomerId(null);
+		if (id !== "clients") setSelectedClientId(null);
 	};
 	const todayKey = todayStr();
 	const todayCallsSorted = data.calls.filter((c) => countsInCallLog(c) && c.datetime?.startsWith(todayKey)).slice().sort((a, b) => new Date(b.datetime).getTime() - new Date(a.datetime).getTime());
@@ -1722,7 +1778,7 @@ export function ZynloApp({ initial }: { initial: ZynloData }) {
 	todayCallsSorted.filter((c) => c.type === "Callback");
 	todayCallsSorted.slice(0, 8);
 	const recentMsgs = messages.slice().sort((a, b) => new Date(b.datetime).getTime() - new Date(a.datetime).getTime()).slice(0, 5);
-	const authedAgent = data.agents.find((a) => a.id === session?.agentId && a.passwordHash && a.passwordHash === session.proof);
+	const authedAgent = session ? data.agents.find((a) => a.id === session.agentId) : null;
 	const sessionPending = !!session && data.agents.length === 0;
 	if (!sessionPending && !authedAgent) {
 		return /* @__PURE__ */ jsxs("div", {
@@ -1744,8 +1800,10 @@ export function ZynloApp({ initial }: { initial: ZynloData }) {
 						/* @__PURE__ */ jsx(Field, {
 							label: "Agent",
 							children: /* @__PURE__ */ jsxs("select", {
+								name: "agentId",
 								required: true,
 								className: inputClass,
+								autoComplete: "username",
 								value: loginAgentId,
 								onChange: (e) => {
 									setLoginAgentId(e.target.value);
@@ -1763,15 +1821,12 @@ export function ZynloApp({ initial }: { initial: ZynloData }) {
 						/* @__PURE__ */ jsx(Field, {
 							label: "Password",
 							children: /* @__PURE__ */ jsx("input", {
+								name: "password",
 								type: "password",
 								required: true,
 								autoComplete: "current-password",
 								className: inputClass,
-								value: loginPassword,
-								onChange: (e) => {
-									setLoginPassword(e.target.value);
-									setLoginErr("");
-								}
+								onInput: () => setLoginErr("")
 							})
 						}),
 						loginErr ? /* @__PURE__ */ jsx("p", {
@@ -3561,6 +3616,7 @@ export function ZynloApp({ initial }: { initial: ZynloData }) {
 								onChange: (e) => {
 									const phone = e.target.value;
 									const match = findCustomerByPhone(data.customers, phone);
+									setNameOverwrite("keep");
 									setQuickForm((f) => ({
 										...f,
 										phone,
@@ -4551,12 +4607,12 @@ export function ZynloApp({ initial }: { initial: ZynloData }) {
 										reconcilePreview.detectedDirection ? ` · ${reconcilePreview.detectedDirection.toLowerCase()}` : ""
 									]
 								}),
-								reconcilePreview.missing.length === 0 && !(reconcilePreview.directionFixes || []).length ? /* @__PURE__ */ jsx("div", {
+								reconcilePreview.missing.length === 0 && !(reconcilePreview.directionFixes || []).length && !(reconcilePreview.extraIds || []).length ? /* @__PURE__ */ jsx("div", {
 									className: "text-sm text-muted",
-									children: "Every answered inbound and outbound call is already in the log."
+									children: "Every answered call in this file is already in the log."
 								}) : reconcilePreview.missing.length === 0 ? /* @__PURE__ */ jsx("div", {
 									className: "text-sm text-muted",
-									children: "No new rows. Direction on existing calls will be updated."
+									children: (reconcilePreview.extraIds || []).length ? "No new rows. Extra calls on those days will be hidden." : "No new rows. Handle time on existing calls will be updated."
 								}) : /* @__PURE__ */ jsx("div", {
 									className: "grid grid-cols-1 gap-3 sm:grid-cols-2",
 									children: [["Inbound", reconcilePreview.missingInbound], ["Outbound", reconcilePreview.missingOutbound]].map(([label, list]) => /* @__PURE__ */ jsxs("div", {
@@ -4598,20 +4654,45 @@ export function ZynloApp({ initial }: { initial: ZynloData }) {
 			}),
 			/* @__PURE__ */ jsx(Modal, {
 				open: modal === "export",
-				onClose: () => setModal(null),
-				title: "Export Data",
-				children: /* @__PURE__ */ jsx("div", {
+				onClose: () => {
+					setExportClientStep(null);
+					setModal(null);
+				},
+				title: exportClientStep === "client-pdf" ? "Client PDF" : exportClientStep === "client-report" ? "Client CSV" : "Export Data",
+				children: exportClientStep ? /* @__PURE__ */ jsxs("div", {
+					className: "space-y-3",
+					children: [/* @__PURE__ */ jsxs("select", {
+						className: inputClass,
+						value: exportClientName,
+						onChange: (e) => setExportClientName(e.target.value),
+						children: data.clients.map((c) => /* @__PURE__ */ jsx("option", {
+							value: c.id,
+							children: c.name
+						}, c.id))
+					}), /* @__PURE__ */ jsxs("div", {
+						className: "flex gap-2",
+						children: [/* @__PURE__ */ jsx(Btn, {
+							variant: "secondary",
+							onClick: () => setExportClientStep(null),
+							children: "Back"
+						}), /* @__PURE__ */ jsx(Btn, {
+							disabled: !exportClientName,
+							onClick: () => exportClientStep === "client-pdf" ? exportPdf(exportClientName) : exportCsv("client-report", exportClientName),
+							children: "Download"
+						})]
+					})]
+				}) : /* @__PURE__ */ jsx("div", {
 					className: "grid gap-3",
 					children: [
 						[
 							"client-pdf",
 							"Client PDF report",
-							"Branded 14-day performance pack for the account"
+							"One client, last 14 days"
 						],
 						[
 							"client-report",
-							"All client packs (CSV)",
-							"One file per client - last 14 days"
+							"Client pack (CSV)",
+							"One client, last 14 days"
 						],
 						[
 							"clients",
@@ -4651,7 +4732,14 @@ export function ZynloApp({ initial }: { initial: ZynloData }) {
 					].map(([key, title, desc]) => /* @__PURE__ */ jsxs("button", {
 						type: "button",
 						className: "flex items-start gap-3 rounded-xl border-2 border-border p-4 text-left transition hover:border-primary hover:bg-bg",
-						onClick: () => key === "client-pdf" ? exportPdf() : exportCsv(key),
+						onClick: () => {
+							if (key === "client-pdf" || key === "client-report") {
+								setExportClientName(selectedClientId || data.clients[0]?.id || "");
+								setExportClientStep(key);
+								return;
+							}
+							exportCsv(key);
+						},
 						children: [/* @__PURE__ */ jsx(Download, { className: "mt-0.5 h-5 w-5 text-primary" }), /* @__PURE__ */ jsxs("div", { children: [/* @__PURE__ */ jsx("div", {
 							className: "text-sm font-bold",
 							children: title
@@ -4663,18 +4751,12 @@ export function ZynloApp({ initial }: { initial: ZynloData }) {
 				})
 			}),
 			/* @__PURE__ */ jsx(Modal, {
-				open: modal === "confirm" && !!confirm,
-				onClose: () => {
-					setModal(null);
-					setConfirm(null);
-				},
+				open: !!confirm,
+				onClose: () => setConfirm(null),
 				title: confirm?.title || "Confirm",
 				footer: /* @__PURE__ */ jsxs(Fragment, { children: [/* @__PURE__ */ jsx(Btn, {
 					variant: "secondary",
-					onClick: () => {
-						setModal(null);
-						setConfirm(null);
-					},
+					onClick: () => setConfirm(null),
 					children: "Cancel"
 				}), /* @__PURE__ */ jsx(Btn, {
 					variant: "danger",

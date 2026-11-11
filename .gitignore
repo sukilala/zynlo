@@ -3,3 +3,10 @@ node_modules/
 .github_repo
 .env
 .env.*
+
+.secrets/
+src/lib/zynlo/firebase-adminsdk.server.json
+attachments/*firebase-adminsdk*
+
+.vercel/
+artifacts/

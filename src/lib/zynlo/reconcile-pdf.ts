@@ -807,10 +807,14 @@ export function buildReconcilePreviewFromRows(
   const onlyOutbound = outboundDays.size > 0 && inboundDays.size === 0;
   const onlyInbound = inboundDays.size > 0 && outboundDays.size === 0;
 
-  // CSV answered rows are the cap for that direction on those days.
-  // Outgoing files without "outgoing" in the name still cap outbound.
-  if (inboundTruth || mixedBatch || onlyInbound) hideUnmatched("Inbound", inboundDays);
-  if (outboundTruth || mixedBatch || onlyOutbound) hideUnmatched("Outbound", outboundDays);
+  if (fileDirection === "Outbound" || (outboundTruth && !inboundTruth)) {
+    hideUnmatched("Outbound", outboundDays);
+  } else if (fileDirection === "Inbound" || (inboundTruth && !outboundTruth)) {
+    hideUnmatched("Inbound", inboundDays);
+  } else {
+    if (mixedBatch || onlyInbound) hideUnmatched("Inbound", inboundDays);
+    if (mixedBatch || onlyOutbound) hideUnmatched("Outbound", outboundDays);
+  }
   return {
     filename,
     answered: answered.length,

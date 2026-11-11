@@ -12,6 +12,7 @@ import type {
   ZynloData,
 } from "./types";
 import { QA_PARTS } from "./types";
+import { weightedQa } from "./utils";
 
 const RTDB_ROOT =
   "https://zynlo-crm-default-rtdb.firebaseio.com";
@@ -57,6 +58,17 @@ function uid() {
   return Date.now().toString(36) + Math.random().toString(36).slice(2, 10);
 }
 
+async function authedHeaders(
+  base: Record<string, string>,
+): Promise<Record<string, string>> {
+  if (typeof window !== "undefined") {
+    throw new Error("The workspace can only be reached from the server");
+  }
+  const { getFirebaseAccessToken } = await import("./firebase-token.server");
+  const token = await getFirebaseAccessToken();
+  return { ...base, Authorization: `Bearer ${token}` };
+}
+
 async function rtdbFetch<T>(
   path: string,
   init?: RequestInit,
@@ -64,13 +76,11 @@ async function rtdbFetch<T>(
   const url = `${RTDB_ROOT}${path.startsWith("/") ? path : `/${path}`}`;
   const res = await fetch(url, {
     ...init,
-    headers: {
+    headers: await authedHeaders({
       Accept: "application/json",
-      ...(init?.body
-        ? { "Content-Type": "application/json" }
-        : {}),
-      ...(init?.headers || {}),
-    },
+      ...(init?.body ? { "Content-Type": "application/json" } : {}),
+      ...(init?.headers as Record<string, string> | undefined),
+    }),
     cache: "no-store",
   });
   if (!res.ok) {
@@ -133,12 +143,12 @@ let migratePromise: Promise<void> | null = null;
 async function rtdbGetCollection(col: Collection): Promise<unknown> {
   const path = `/${col}.json`;
   const url = `${RTDB_ROOT}${path}`;
-  const headers: Record<string, string> = {
+  const prev = collectionCache[col];
+  const headers = await authedHeaders({
     Accept: "application/json",
     "X-Firebase-ETag": "true",
-  };
-  const prev = collectionCache[col];
-  if (prev?.etag) headers["If-None-Match"] = prev.etag;
+    ...(prev?.etag ? { "If-None-Match": prev.etag } : {}),
+  });
   const res = await fetch(url, { headers, cache: "no-store" });
   if (res.status === 304 && prev) return prev.data;
   if (!res.ok) {
@@ -182,6 +192,13 @@ function mapAgent(r: Record<string, unknown>): Agent {
   };
 }
 
+export async function firebaseListAgents(): Promise<Agent[]> {
+  const raw = await rtdbFetch<unknown>("/agents.json");
+  return valuesSorted(toIdMap(raw), "name").map((row) =>
+    mapAgent(row as Record<string, unknown>),
+  );
+}
+
 function mapCustomer(r: Record<string, unknown>): Customer {
   return {
     id: String(r.id),
@@ -212,6 +229,18 @@ function mapCall(
   r: Record<string, unknown>,
   clientIdOverride?: string | null,
 ): Call {
+  const qa = parseQa(r.qa);
+  const weighted = weightedQa(qa);
+  const rawRating =
+    r.rating == null || r.rating === "" ? null : Number(r.rating);
+  const rating =
+    weighted != null
+      ? weighted
+      : rawRating != null && Number.isFinite(rawRating)
+        ? rawRating
+        : null;
+  const hidden =
+    r.csvCounted === false || String(r.csvCounted).toLowerCase() === "false";
   return {
     id: String(r.id),
     datetime: String(r.datetime || ""),
@@ -226,18 +255,18 @@ function mapCall(
     type: (r.type as Call["type"]) || "Inbound",
     duration: Number(r.duration) || 0,
     outcome: (r.outcome as Call["outcome"]) || "Resolved",
-    rating: r.rating == null || r.rating === "" ? null : Number(r.rating),
+    rating,
     ratingScale:
-      r.ratingScale === 10 || Number(r.rating) > 5
+      weighted != null || r.ratingScale === 10 || (rating != null && rating > 5)
         ? 10
-        : r.rating == null || r.rating === ""
+        : rating == null
           ? undefined
           : 5,
-    qa: parseQa(r.qa),
+    qa,
     notes: String(r.notes || ""),
     followUpAt: r.followUpAt ? String(r.followUpAt).slice(0, 10) : null,
     source: r.source === "telecom" ? "telecom" : "manual",
-    csvCounted: r.csvCounted === false ? false : r.csvCounted === true ? true : undefined,
+    csvCounted: hidden ? false : true,
   };
 }
 
