@@ -267,7 +267,7 @@ function QaScorecard({ value, onChange }) {
 			QA_PARTS.map((part) => /* @__PURE__ */ jsxs("div", {
 				children: [
 					/* @__PURE__ */ jsxs("div", {
-						className: "mb-1 flex items-baseline justify-between gap-2 text-[11px] font-semibold uppercase tracking-wide text-muted",
+						className: "mb-1 flex items-baseline justify-between gap-2 text-[0.6875rem] font-semibold uppercase tracking-wide text-muted",
 						children: [
 							/* @__PURE__ */ jsx("span", { children: part.label }),
 							/* @__PURE__ */ jsx("span", { children: `${Math.round(part.weight * 100)}%` })
@@ -1737,7 +1737,7 @@ export function ZynloApp({ initial }: { initial: ZynloData }) {
 			className: "flex min-h-screen items-center justify-center bg-bg px-4 text-fg",
 			children: [
 				/* @__PURE__ */ jsxs("div", {
-					className: "w-full max-w-sm space-y-4 rounded-2xl border border-border bg-surface p-6 text-center shadow-[0_12px_40px_rgba(45,27,78,0.18)]",
+					className: "w-full max-w-sm space-y-4 rounded-2xl border border-border bg-surface p-6 text-center shadow-[0_0.75rem_2.5rem_rgba(45,27,78,0.18)]",
 					children: [
 						/* @__PURE__ */ jsx("img", {
 							src: publicAsset("logo-wordmark.png"),
@@ -1767,7 +1767,7 @@ export function ZynloApp({ initial }: { initial: ZynloData }) {
 		children: [
 			/* @__PURE__ */ jsx("button", {
 				type: "button",
-				className: "fixed left-4 top-4 z-[200] flex h-10 w-10 items-center justify-center rounded-[10px] bg-primary text-white shadow-[0_4px_15px_rgba(167,67,255,0.3)] md:hidden",
+				className: "fixed left-4 top-4 z-[200] flex h-10 w-10 items-center justify-center rounded-[0.625rem] bg-primary text-white shadow-[0_0.25rem_0.9375rem_rgba(167,67,255,0.3)] md:hidden",
 				onClick: () => setSidebarOpen((o) => !o),
 				"aria-label": "Menu",
 				children: sidebarOpen ? /* @__PURE__ */ jsx(X, { className: "h-5 w-5" }) : /* @__PURE__ */ jsx(Menu, { className: "h-5 w-5" })
@@ -1777,14 +1777,14 @@ export function ZynloApp({ initial }: { initial: ZynloData }) {
 				onClick: () => setSidebarOpen(false)
 			}),
 			/* @__PURE__ */ jsxs("aside", {
-				className: cn("fixed z-[100] flex h-full w-[260px] flex-col overflow-y-auto bg-gradient-to-b from-sidebar to-sidebar-2 px-4 py-6 transition-transform duration-300", sidebarOpen ? "translate-x-0" : "-translate-x-full md:translate-x-0"),
+				className: cn("fixed z-[100] flex h-full w-[16.25rem] flex-col overflow-y-auto bg-gradient-to-b from-sidebar to-sidebar-2 px-4 py-6 transition-transform duration-300", sidebarOpen ? "translate-x-0" : "-translate-x-full md:translate-x-0"),
 				children: [
 					/* @__PURE__ */ jsx("div", {
 						className: "mb-8 flex items-center px-2 pt-1",
 						children: /* @__PURE__ */ jsx("img", {
 							src: publicAsset("logo-wordmark.png"),
 							alt: "ZYNLO",
-							className: "h-8 w-auto max-w-[180px] object-contain object-left md:h-9"
+							className: "h-8 w-auto max-w-[11.25rem] object-contain object-left md:h-9"
 						})
 					}),
 					/* @__PURE__ */ jsx("nav", {
@@ -1794,7 +1794,7 @@ export function ZynloApp({ initial }: { initial: ZynloData }) {
 							return /* @__PURE__ */ jsxs("button", {
 								type: "button",
 								onClick: () => go(item.id),
-								className: cn("flex items-center gap-3 rounded-[10px] px-4 py-3 text-sm font-medium transition-all", section === item.id ? "bg-primary text-white shadow-[0_4px_15px_rgba(167,67,255,0.3)]" : "text-white/60 hover:bg-primary/15 hover:text-white"),
+								className: cn("flex items-center gap-3 rounded-[0.625rem] px-4 py-3 text-sm font-medium transition-all", section === item.id ? "bg-primary text-white shadow-[0_0.25rem_0.9375rem_rgba(167,67,255,0.3)]" : "text-white/60 hover:bg-primary/15 hover:text-white"),
 								children: [/* @__PURE__ */ jsx(Icon, { className: "h-4 w-4 shrink-0" }), item.label]
 							}, item.id);
 						})
@@ -1802,7 +1802,7 @@ export function ZynloApp({ initial }: { initial: ZynloData }) {
 					/* @__PURE__ */ jsxs("div", {
 						className: "mt-4 rounded-xl border border-white/10 bg-white/5 p-3",
 						children: [/* @__PURE__ */ jsx("div", {
-							className: "mb-1 text-[10px] font-semibold uppercase tracking-wide text-white/50",
+							className: "mb-1 text-[0.625rem] font-semibold uppercase tracking-wide text-white/50",
 							children: "Signed in"
 						}), /* @__PURE__ */ jsx("div", {
 							className: "truncate text-sm font-semibold text-white",
@@ -1816,7 +1816,7 @@ export function ZynloApp({ initial }: { initial: ZynloData }) {
 				]
 			}),
 			/* @__PURE__ */ jsxs("main", {
-				className: "min-w-0 flex-1 px-4 py-4 pt-16 md:ml-[260px] md:px-8 md:py-6 md:pt-6",
+				className: "min-w-0 flex-1 px-4 py-4 pt-16 md:ml-[16.25rem] md:px-8 md:py-6 md:pt-6",
 				children: [
 					section === "dashboard" && /* @__PURE__ */ jsxs(SectionView, { children: [
 						/* @__PURE__ */ jsx(Header, {
@@ -1979,7 +1979,7 @@ export function ZynloApp({ initial }: { initial: ZynloData }) {
 						/* @__PURE__ */ jsxs("div", {
 							className: "grid grid-cols-1 gap-6 lg:grid-cols-2",
 							children: [/* @__PURE__ */ jsxs(Card, { children: [/* @__PURE__ */ jsx(CardHeader, { title: "Calls by Day" }), /* @__PURE__ */ jsx("div", {
-								className: "h-[260px] p-4",
+								className: "h-[16.25rem] p-4",
 								children: /* @__PURE__ */ jsx(ResponsiveContainer, {
 									width: "100%",
 									height: "100%",
@@ -1993,12 +1993,12 @@ export function ZynloApp({ initial }: { initial: ZynloData }) {
 											}),
 											/* @__PURE__ */ jsx(XAxis, {
 												dataKey: "label",
-												tick: { fontSize: 10 },
+												tick: { fontSize: "0.625rem" },
 												interval: 0
 											}),
 											/* @__PURE__ */ jsx(YAxis, {
 												allowDecimals: false,
-												tick: { fontSize: 11 }
+												tick: { fontSize: "0.6875rem" }
 											}),
 											/* @__PURE__ */ jsx(Tooltip, {}),
 											/* @__PURE__ */ jsx(Bar, {
@@ -2015,7 +2015,7 @@ export function ZynloApp({ initial }: { initial: ZynloData }) {
 									})
 								})
 							})] }), /* @__PURE__ */ jsxs(Card, { children: [/* @__PURE__ */ jsx(CardHeader, { title: "Call Outcomes" }), /* @__PURE__ */ jsx("div", {
-								className: "h-[260px] p-4",
+								className: "h-[16.25rem] p-4",
 								children: /* @__PURE__ */ jsx(ResponsiveContainer, {
 									width: "100%",
 									height: "100%",
@@ -2025,8 +2025,8 @@ export function ZynloApp({ initial }: { initial: ZynloData }) {
 										data: outcomeData,
 										dataKey: "value",
 										nameKey: "name",
-										innerRadius: 55,
-										outerRadius: 90,
+										innerRadius: "48.25%",
+										outerRadius: "78.95%",
 										paddingAngle: 2,
 										children: outcomeData.map((_, i) => /* @__PURE__ */ jsx(Cell, { fill: CHART_COLORS[i % CHART_COLORS.length] }, i))
 									}), /* @__PURE__ */ jsx(Tooltip, {})] })
@@ -2123,7 +2123,7 @@ export function ZynloApp({ initial }: { initial: ZynloData }) {
 											children: [m.subject ? `${m.subject}: ` : "", m.body]
 										}),
 										m.notes ? /* @__PURE__ */ jsxs("div", {
-											className: "text-[11px] text-primary",
+											className: "text-[0.6875rem] text-primary",
 											children: ["Note: ", shortNotes(m.notes, 80)]
 										}) : null
 									]
@@ -2149,10 +2149,10 @@ export function ZynloApp({ initial }: { initial: ZynloData }) {
 								placeholder: "Name, phone, notes, date..."
 							}),
 							/* @__PURE__ */ jsxs("label", {
-								className: "flex min-h-11 min-w-[148px] flex-1 items-center gap-2 rounded-[10px] border border-border bg-bg px-3 text-sm sm:flex-none",
+								className: "flex min-h-11 min-w-[9.25rem] flex-1 items-center gap-2 rounded-[0.625rem] border border-border bg-bg px-3 text-sm sm:flex-none",
 								children: [
 									/* @__PURE__ */ jsx("span", {
-										className: "shrink-0 text-[11px] font-semibold uppercase tracking-wide text-muted",
+										className: "shrink-0 text-[0.6875rem] font-semibold uppercase tracking-wide text-muted",
 										children: "From"
 									}),
 									/* @__PURE__ */ jsx("input", {
@@ -2164,10 +2164,10 @@ export function ZynloApp({ initial }: { initial: ZynloData }) {
 								]
 							}),
 							/* @__PURE__ */ jsxs("label", {
-								className: "flex min-h-11 min-w-[148px] flex-1 items-center gap-2 rounded-[10px] border border-border bg-bg px-3 text-sm sm:flex-none",
+								className: "flex min-h-11 min-w-[9.25rem] flex-1 items-center gap-2 rounded-[0.625rem] border border-border bg-bg px-3 text-sm sm:flex-none",
 								children: [
 									/* @__PURE__ */ jsx("span", {
-										className: "shrink-0 text-[11px] font-semibold uppercase tracking-wide text-muted",
+										className: "shrink-0 text-[0.6875rem] font-semibold uppercase tracking-wide text-muted",
 										children: "To"
 									}),
 									/* @__PURE__ */ jsx("input", {
@@ -2180,7 +2180,7 @@ export function ZynloApp({ initial }: { initial: ZynloData }) {
 							}),
 							/* @__PURE__ */ jsx("button", {
 								type: "button",
-								className: "min-h-11 rounded-[10px] border-2 border-border bg-surface px-3 text-sm font-semibold text-fg hover:border-primary hover:text-primary",
+								className: "min-h-11 rounded-[0.625rem] border-2 border-border bg-surface px-3 text-sm font-semibold text-fg hover:border-primary hover:text-primary",
 								onClick: () => {
 									const d = todayStr();
 									setCallDateFrom(d);
@@ -2190,7 +2190,7 @@ export function ZynloApp({ initial }: { initial: ZynloData }) {
 							}),
 							(callDateFrom || callDateTo) && /* @__PURE__ */ jsx("button", {
 								type: "button",
-								className: "min-h-11 rounded-[10px] border-2 border-border bg-surface px-3 text-sm font-semibold text-muted hover:border-primary hover:text-primary",
+								className: "min-h-11 rounded-[0.625rem] border-2 border-border bg-surface px-3 text-sm font-semibold text-muted hover:border-primary hover:text-primary",
 								onClick: () => {
 									setCallDateFrom("");
 									setCallDateTo("");
@@ -2198,7 +2198,7 @@ export function ZynloApp({ initial }: { initial: ZynloData }) {
 								children: "Clear dates"
 							}),
 							/* @__PURE__ */ jsxs("select", {
-								className: "w-full rounded-[10px] border border-border bg-bg px-3.5 py-2.5 text-sm text-fg outline-none transition focus:border-primary focus:shadow-[0_0_0_3px_rgba(167,67,255,0.12)] w-auto min-w-[140px]",
+								className: "w-full rounded-[0.625rem] border border-border bg-bg px-3.5 py-2.5 text-sm text-fg outline-none transition focus:border-primary focus:shadow-[0_0_0_0.1875rem_rgba(167,67,255,0.12)] w-auto min-w-[8.75rem]",
 								value: callOutcome,
 								onChange: (e) => setCallOutcome(e.target.value),
 								children: [/* @__PURE__ */ jsx("option", {
@@ -2213,7 +2213,7 @@ export function ZynloApp({ initial }: { initial: ZynloData }) {
 								}) : null]
 							}),
 							/* @__PURE__ */ jsxs("select", {
-								className: "w-full rounded-[10px] border border-border bg-bg px-3.5 py-2.5 text-sm text-fg outline-none transition focus:border-primary focus:shadow-[0_0_0_3px_rgba(167,67,255,0.12)] w-auto min-w-[140px]",
+								className: "w-full rounded-[0.625rem] border border-border bg-bg px-3.5 py-2.5 text-sm text-fg outline-none transition focus:border-primary focus:shadow-[0_0_0_0.1875rem_rgba(167,67,255,0.12)] w-auto min-w-[8.75rem]",
 								value: callAgent,
 								onChange: (e) => setCallAgent(e.target.value),
 								children: [/* @__PURE__ */ jsx("option", {
@@ -2225,7 +2225,7 @@ export function ZynloApp({ initial }: { initial: ZynloData }) {
 								}, a.id))]
 							}),
 							/* @__PURE__ */ jsxs("select", {
-								className: "w-full rounded-[10px] border border-border bg-bg px-3.5 py-2.5 text-sm text-fg outline-none transition focus:border-primary focus:shadow-[0_0_0_3px_rgba(167,67,255,0.12)] w-auto min-w-[140px]",
+								className: "w-full rounded-[0.625rem] border border-border bg-bg px-3.5 py-2.5 text-sm text-fg outline-none transition focus:border-primary focus:shadow-[0_0_0_0.1875rem_rgba(167,67,255,0.12)] w-auto min-w-[8.75rem]",
 								value: callType,
 								onChange: (e) => setCallType(e.target.value),
 								children: [/* @__PURE__ */ jsx("option", {
@@ -2272,7 +2272,7 @@ export function ZynloApp({ initial }: { initial: ZynloData }) {
 								placeholder: "Search..."
 							}),
 							/* @__PURE__ */ jsxs("select", {
-								className: "w-full rounded-[10px] border border-border bg-bg px-3.5 py-2.5 text-sm text-fg outline-none transition focus:border-primary focus:shadow-[0_0_0_3px_rgba(167,67,255,0.12)] w-auto min-w-[130px]",
+								className: "w-full rounded-[0.625rem] border border-border bg-bg px-3.5 py-2.5 text-sm text-fg outline-none transition focus:border-primary focus:shadow-[0_0_0_0.1875rem_rgba(167,67,255,0.12)] w-auto min-w-[8.125rem]",
 								value: msgChannel,
 								onChange: (e) => setMsgChannel(e.target.value),
 								children: [/* @__PURE__ */ jsx("option", {
@@ -2284,7 +2284,7 @@ export function ZynloApp({ initial }: { initial: ZynloData }) {
 								}, c))]
 							}),
 							/* @__PURE__ */ jsxs("select", {
-								className: "w-full rounded-[10px] border border-border bg-bg px-3.5 py-2.5 text-sm text-fg outline-none transition focus:border-primary focus:shadow-[0_0_0_3px_rgba(167,67,255,0.12)] w-auto min-w-[130px]",
+								className: "w-full rounded-[0.625rem] border border-border bg-bg px-3.5 py-2.5 text-sm text-fg outline-none transition focus:border-primary focus:shadow-[0_0_0_0.1875rem_rgba(167,67,255,0.12)] w-auto min-w-[8.125rem]",
 								value: msgStatus,
 								onChange: (e) => setMsgStatus(e.target.value),
 								children: [/* @__PURE__ */ jsx("option", {
@@ -2305,7 +2305,7 @@ export function ZynloApp({ initial }: { initial: ZynloData }) {
 							children: /* @__PURE__ */ jsxs("table", {
 								className: "w-full text-sm",
 								children: [/* @__PURE__ */ jsx("thead", { children: /* @__PURE__ */ jsxs("tr", {
-									className: "bg-purple-50 text-left text-[11px] font-semibold uppercase tracking-wide text-muted",
+									className: "bg-purple-50 text-left text-[0.6875rem] font-semibold uppercase tracking-wide text-muted",
 									children: [
 										/* @__PURE__ */ jsx("th", {
 											className: "px-4 py-3",
@@ -2377,7 +2377,7 @@ export function ZynloApp({ initial }: { initial: ZynloData }) {
 												})]
 											}),
 											/* @__PURE__ */ jsxs("td", {
-												className: "max-w-[220px] px-4 py-3",
+												className: "max-w-[13.75rem] px-4 py-3",
 												children: [m.subject ? /* @__PURE__ */ jsx("div", {
 													className: "text-xs font-semibold",
 													children: m.subject
@@ -2394,7 +2394,7 @@ export function ZynloApp({ initial }: { initial: ZynloData }) {
 												})
 											}),
 											/* @__PURE__ */ jsx("td", {
-												className: "max-w-[140px] truncate px-4 py-3 text-xs text-muted",
+												className: "max-w-[8.75rem] truncate px-4 py-3 text-xs text-muted",
 												title: m.notes || void 0,
 												children: shortNotes(m.notes)
 											}),
@@ -2450,7 +2450,7 @@ export function ZynloApp({ initial }: { initial: ZynloData }) {
 						children: /* @__PURE__ */ jsxs("table", {
 							className: "w-full text-sm",
 							children: [/* @__PURE__ */ jsx("thead", { children: /* @__PURE__ */ jsxs("tr", {
-								className: "bg-purple-50 text-left text-[11px] font-semibold uppercase tracking-wide text-muted",
+								className: "bg-purple-50 text-left text-[0.6875rem] font-semibold uppercase tracking-wide text-muted",
 								children: [
 									/* @__PURE__ */ jsx("th", {
 										className: "px-4 py-3",
@@ -2554,7 +2554,7 @@ export function ZynloApp({ initial }: { initial: ZynloData }) {
 												className: "font-semibold text-primary",
 												children: ["★ ", formatQa(s.weekQa)]
 											}), /* @__PURE__ */ jsxs("div", {
-												className: "text-[11px] text-muted",
+												className: "text-[0.6875rem] text-muted",
 												children: [
 													s.weekRated,
 													" this week",
@@ -2643,7 +2643,7 @@ export function ZynloApp({ initial }: { initial: ZynloData }) {
 							children: /* @__PURE__ */ jsxs("table", {
 								className: "w-full text-sm",
 								children: [/* @__PURE__ */ jsx("thead", { children: /* @__PURE__ */ jsxs("tr", {
-									className: "bg-purple-50 text-left text-[11px] font-semibold uppercase tracking-wide text-muted",
+									className: "bg-purple-50 text-left text-[0.6875rem] font-semibold uppercase tracking-wide text-muted",
 									children: [
 										/* @__PURE__ */ jsx("th", {
 											className: "px-4 py-3",
@@ -2713,7 +2713,7 @@ export function ZynloApp({ initial }: { initial: ZynloData }) {
 												children: s.messages
 											}),
 											/* @__PURE__ */ jsx("td", {
-												className: "max-w-[200px] truncate px-4 py-3 text-xs text-muted",
+												className: "max-w-[12.5rem] truncate px-4 py-3 text-xs text-muted",
 												title: s.activityNotes || void 0,
 												children: shortNotes(s.activityNotes)
 											}),
@@ -2788,7 +2788,7 @@ export function ZynloApp({ initial }: { initial: ZynloData }) {
 							children: /* @__PURE__ */ jsxs("table", {
 								className: "w-full text-sm",
 								children: [/* @__PURE__ */ jsx("thead", { children: /* @__PURE__ */ jsxs("tr", {
-									className: "bg-purple-50 text-left text-[11px] font-semibold uppercase tracking-wide text-muted",
+									className: "bg-purple-50 text-left text-[0.6875rem] font-semibold uppercase tracking-wide text-muted",
 									children: [
 										/* @__PURE__ */ jsx("th", {
 											className: "px-4 py-3",
@@ -2859,7 +2859,7 @@ export function ZynloApp({ initial }: { initial: ZynloData }) {
 												children: s.messages
 											}),
 											/* @__PURE__ */ jsx("td", {
-												className: "max-w-[200px] truncate px-4 py-3 text-xs text-muted",
+												className: "max-w-[12.5rem] truncate px-4 py-3 text-xs text-muted",
 												title: s.allNotes || void 0,
 												children: shortNotes(s.allNotes)
 											}),
@@ -3041,7 +3041,7 @@ export function ZynloApp({ initial }: { initial: ZynloData }) {
 												className: "text-lg font-bold text-primary",
 												children: value
 											}), /* @__PURE__ */ jsx("div", {
-												className: "text-[11px] font-semibold uppercase tracking-wide text-muted",
+												className: "text-[0.6875rem] font-semibold uppercase tracking-wide text-muted",
 												children: label
 											})]
 										}, String(label)))
@@ -3054,7 +3054,7 @@ export function ZynloApp({ initial }: { initial: ZynloData }) {
 										children: /* @__PURE__ */ jsxs("table", {
 											className: "w-full text-sm",
 											children: [/* @__PURE__ */ jsx("thead", { children: /* @__PURE__ */ jsxs("tr", {
-												className: "bg-purple-50 text-left text-[11px] font-semibold uppercase tracking-wide text-muted",
+												className: "bg-purple-50 text-left text-[0.6875rem] font-semibold uppercase tracking-wide text-muted",
 												children: [
 													/* @__PURE__ */ jsx("th", {
 														className: "px-4 py-2",
@@ -3099,7 +3099,7 @@ export function ZynloApp({ initial }: { initial: ZynloData }) {
 															children: cs.messages
 														}),
 														/* @__PURE__ */ jsx("td", {
-															className: "max-w-[140px] truncate px-4 py-2 text-xs text-muted",
+															className: "max-w-[8.75rem] truncate px-4 py-2 text-xs text-muted",
 															title: cs.activityNotes || void 0,
 															children: shortNotes(cs.activityNotes)
 														})
@@ -3116,7 +3116,7 @@ export function ZynloApp({ initial }: { initial: ZynloData }) {
 										children: [/* @__PURE__ */ jsxs("table", {
 											className: "w-full text-sm",
 											children: [/* @__PURE__ */ jsx("thead", { children: /* @__PURE__ */ jsxs("tr", {
-												className: "bg-purple-50 text-left text-[11px] font-semibold uppercase tracking-wide text-muted",
+												className: "bg-purple-50 text-left text-[0.6875rem] font-semibold uppercase tracking-wide text-muted",
 												children: [
 													/* @__PURE__ */ jsx("th", {
 														className: "px-4 py-2",
@@ -3189,7 +3189,7 @@ export function ZynloApp({ initial }: { initial: ZynloData }) {
 														})
 													}),
 													/* @__PURE__ */ jsx("td", {
-														className: "max-w-[160px] truncate px-4 py-2 text-xs text-muted",
+														className: "max-w-[10rem] truncate px-4 py-2 text-xs text-muted",
 														title: call.notes || void 0,
 														children: shortNotes(call.notes)
 													})
@@ -3212,7 +3212,7 @@ export function ZynloApp({ initial }: { initial: ZynloData }) {
 										children: /* @__PURE__ */ jsxs("table", {
 											className: "w-full text-sm",
 											children: [/* @__PURE__ */ jsx("thead", { children: /* @__PURE__ */ jsxs("tr", {
-												className: "bg-purple-50 text-left text-[11px] font-semibold uppercase tracking-wide text-muted",
+												className: "bg-purple-50 text-left text-[0.6875rem] font-semibold uppercase tracking-wide text-muted",
 												children: [
 													/* @__PURE__ */ jsx("th", {
 														className: "px-4 py-2",
@@ -3266,7 +3266,7 @@ export function ZynloApp({ initial }: { initial: ZynloData }) {
 														children: m.status
 													}),
 													/* @__PURE__ */ jsx("td", {
-														className: "max-w-[160px] truncate px-4 py-2 text-xs text-muted",
+														className: "max-w-[10rem] truncate px-4 py-2 text-xs text-muted",
 														title: m.notes || void 0,
 														children: shortNotes(m.notes)
 													})
@@ -3299,7 +3299,7 @@ export function ZynloApp({ initial }: { initial: ZynloData }) {
 						analyticsTab === "performance" && /* @__PURE__ */ jsxs("div", {
 							className: "grid grid-cols-1 gap-6 lg:grid-cols-2",
 							children: [/* @__PURE__ */ jsxs(Card, { children: [/* @__PURE__ */ jsx(CardHeader, { title: "Daily Volume (Last 7 Days)" }), /* @__PURE__ */ jsx("div", {
-								className: "h-[280px] p-4",
+								className: "h-[17.5rem] p-4",
 								children: /* @__PURE__ */ jsx(ResponsiveContainer, {
 									width: "100%",
 									height: "100%",
@@ -3313,11 +3313,11 @@ export function ZynloApp({ initial }: { initial: ZynloData }) {
 											}),
 											/* @__PURE__ */ jsx(XAxis, {
 												dataKey: "label",
-												tick: { fontSize: 11 }
+												tick: { fontSize: "0.6875rem" }
 											}),
 											/* @__PURE__ */ jsx(YAxis, {
 												allowDecimals: false,
-												tick: { fontSize: 11 }
+												tick: { fontSize: "0.6875rem" }
 											}),
 											/* @__PURE__ */ jsx(Tooltip, {}),
 											/* @__PURE__ */ jsx(Line, {
@@ -3341,7 +3341,7 @@ export function ZynloApp({ initial }: { initial: ZynloData }) {
 									})
 								})
 							})] }), /* @__PURE__ */ jsxs(Card, { children: [/* @__PURE__ */ jsx(CardHeader, { title: "Outcome Breakdown" }), /* @__PURE__ */ jsx("div", {
-								className: "h-[280px] p-4",
+								className: "h-[17.5rem] p-4",
 								children: /* @__PURE__ */ jsx(ResponsiveContainer, {
 									width: "100%",
 									height: "100%",
@@ -3351,14 +3351,14 @@ export function ZynloApp({ initial }: { initial: ZynloData }) {
 										data: outcomeData,
 										dataKey: "value",
 										nameKey: "name",
-										outerRadius: 100,
+										outerRadius: "80.65%",
 										children: outcomeData.map((_, i) => /* @__PURE__ */ jsx(Cell, { fill: CHART_COLORS[i % CHART_COLORS.length] }, i))
 									}), /* @__PURE__ */ jsx(Tooltip, {})] })
 								})
 							})] })]
 						}),
 						analyticsTab === "trends" && /* @__PURE__ */ jsxs(Card, { children: [/* @__PURE__ */ jsx(CardHeader, { title: "Average Handle Time Trend" }), /* @__PURE__ */ jsx("div", {
-							className: "h-[300px] p-4",
+							className: "h-[18.75rem] p-4",
 							children: /* @__PURE__ */ jsx(ResponsiveContainer, {
 								width: "100%",
 								height: "100%",
@@ -3372,9 +3372,9 @@ export function ZynloApp({ initial }: { initial: ZynloData }) {
 										}),
 										/* @__PURE__ */ jsx(XAxis, {
 											dataKey: "label",
-											tick: { fontSize: 11 }
+											tick: { fontSize: "0.6875rem" }
 										}),
-										/* @__PURE__ */ jsx(YAxis, { tick: { fontSize: 11 } }),
+										/* @__PURE__ */ jsx(YAxis, { tick: { fontSize: "0.6875rem" } }),
 										/* @__PURE__ */ jsx(Tooltip, {}),
 										/* @__PURE__ */ jsx(Line, {
 											type: "monotone",
@@ -3396,7 +3396,7 @@ export function ZynloApp({ initial }: { initial: ZynloData }) {
 							children: /* @__PURE__ */ jsxs("table", {
 								className: "w-full text-sm",
 								children: [/* @__PURE__ */ jsx("thead", { children: /* @__PURE__ */ jsxs("tr", {
-									className: "bg-purple-50 text-left text-[11px] font-semibold uppercase tracking-wide text-muted",
+									className: "bg-purple-50 text-left text-[0.6875rem] font-semibold uppercase tracking-wide text-muted",
 									children: [
 										/* @__PURE__ */ jsx("th", {
 											className: "px-4 py-3",
@@ -3640,7 +3640,7 @@ export function ZynloApp({ initial }: { initial: ZynloData }) {
 										duration: e.target.value
 									}))
 								}), /* @__PURE__ */ jsx("div", {
-									className: "mt-1 text-[11px] text-muted",
+									className: "mt-1 text-[0.6875rem] text-muted",
 									children: `Handle time ${formatDuration(handleMinutes(parseFloat(quickForm.duration) || 0))} · includes 25% after-call work`
 								})] })
 							}),
@@ -3665,7 +3665,7 @@ export function ZynloApp({ initial }: { initial: ZynloData }) {
 								label: "Follow-up due",
 								children: /* @__PURE__ */ jsx("input", {
 									type: "date",
-									className: "w-full rounded-[10px] border border-border bg-bg px-3.5 py-2.5 text-sm text-fg outline-none transition focus:border-primary focus:shadow-[0_0_0_3px_rgba(167,67,255,0.12)]",
+									className: "w-full rounded-[0.625rem] border border-border bg-bg px-3.5 py-2.5 text-sm text-fg outline-none transition focus:border-primary focus:shadow-[0_0_0_0.1875rem_rgba(167,67,255,0.12)]",
 									value: quickForm.followUpAt,
 									onChange: (e) => setQuickForm((f) => ({
 										...f,
@@ -3712,7 +3712,7 @@ export function ZynloApp({ initial }: { initial: ZynloData }) {
 							className: "sm:col-span-2",
 							children: /* @__PURE__ */ jsx("textarea", {
 								required: true,
-								className: inputClass + " min-h-[90px]",
+								className: inputClass + " min-h-[5.625rem]",
 								value: quickForm.notes,
 								onChange: (e) => setQuickForm((f) => ({
 									...f,
@@ -3749,7 +3749,7 @@ export function ZynloApp({ initial }: { initial: ZynloData }) {
 					className: "space-y-4",
 					children: [
 						(!data.agents.length || !data.customers.length) && /* @__PURE__ */ jsx("div", {
-							className: "rounded-[10px] border border-purple-200 bg-purple-50 px-4 py-3 text-sm text-purple-800",
+							className: "rounded-[0.625rem] border border-purple-200 bg-purple-50 px-4 py-3 text-sm text-purple-800",
 							children: "Add an agent and customer first."
 						}),
 						/* @__PURE__ */ jsxs("div", {
@@ -3855,7 +3855,7 @@ export function ZynloApp({ initial }: { initial: ZynloData }) {
 											duration: e.target.value
 										}))
 									}), /* @__PURE__ */ jsx("div", {
-										className: "mt-1 text-[11px] text-muted",
+										className: "mt-1 text-[0.6875rem] text-muted",
 										children: `Handle time ${formatDuration(handleMinutes(parseFloat(callForm.duration) || 0))} · includes 25% after-call work`
 									})] })
 								}),
@@ -3877,7 +3877,7 @@ export function ZynloApp({ initial }: { initial: ZynloData }) {
 									label: "Follow-up due",
 									children: /* @__PURE__ */ jsx("input", {
 										type: "date",
-										className: "w-full rounded-[10px] border border-border bg-bg px-3.5 py-2.5 text-sm text-fg outline-none transition focus:border-primary focus:shadow-[0_0_0_3px_rgba(167,67,255,0.12)]",
+										className: "w-full rounded-[0.625rem] border border-border bg-bg px-3.5 py-2.5 text-sm text-fg outline-none transition focus:border-primary focus:shadow-[0_0_0_0.1875rem_rgba(167,67,255,0.12)]",
 										value: callForm.followUpAt,
 										onChange: (e) => setCallForm((f) => ({
 											...f,
@@ -3897,7 +3897,7 @@ export function ZynloApp({ initial }: { initial: ZynloData }) {
 						/* @__PURE__ */ jsx(Field, {
 							label: "Notes",
 							children: /* @__PURE__ */ jsx("textarea", {
-								className: inputClass + " min-h-[80px] resize-y",
+								className: inputClass + " min-h-[5rem] resize-y",
 								value: callForm.notes,
 								onChange: (e) => setCallForm((f) => ({
 									...f,
@@ -3930,7 +3930,7 @@ export function ZynloApp({ initial }: { initial: ZynloData }) {
 					className: "space-y-4",
 					children: [
 						(!data.agents.length || !data.customers.length) && /* @__PURE__ */ jsx("div", {
-							className: "rounded-[10px] border border-purple-200 bg-purple-50 px-4 py-3 text-sm text-purple-800",
+							className: "rounded-[0.625rem] border border-purple-200 bg-purple-50 px-4 py-3 text-sm text-purple-800",
 							children: "Add an agent and customer first."
 						}),
 						/* @__PURE__ */ jsxs("div", {
@@ -4064,7 +4064,7 @@ export function ZynloApp({ initial }: { initial: ZynloData }) {
 							label: "Message body *",
 							children: /* @__PURE__ */ jsx("textarea", {
 								required: true,
-								className: inputClass + " min-h-[100px] resize-y",
+								className: inputClass + " min-h-[6.25rem] resize-y",
 								value: msgForm.body,
 								onChange: (e) => setMsgForm((f) => ({
 									...f,
@@ -4076,7 +4076,7 @@ export function ZynloApp({ initial }: { initial: ZynloData }) {
 						/* @__PURE__ */ jsx(Field, {
 							label: "Notes",
 							children: /* @__PURE__ */ jsx("textarea", {
-								className: inputClass + " min-h-[60px] resize-y",
+								className: inputClass + " min-h-[3.75rem] resize-y",
 								value: msgForm.notes,
 								onChange: (e) => setMsgForm((f) => ({
 									...f,
@@ -4346,7 +4346,7 @@ export function ZynloApp({ initial }: { initial: ZynloData }) {
 						/* @__PURE__ */ jsx(Field, {
 							label: "Address",
 							children: /* @__PURE__ */ jsx("textarea", {
-								className: inputClass + " min-h-[70px]",
+								className: inputClass + " min-h-[4.375rem]",
 								value: clientForm.address,
 								onChange: (e) => setClientForm((f) => ({
 									...f,
@@ -4357,7 +4357,7 @@ export function ZynloApp({ initial }: { initial: ZynloData }) {
 						/* @__PURE__ */ jsx(Field, {
 							label: "Notes",
 							children: /* @__PURE__ */ jsx("textarea", {
-								className: inputClass + " min-h-[70px]",
+								className: inputClass + " min-h-[4.375rem]",
 								value: clientForm.notes,
 								onChange: (e) => setClientForm((f) => ({
 									...f,
@@ -4820,7 +4820,7 @@ function Header({ title, onExport, onReconcile, primaryLabel, onPrimary }) {
 	return /* @__PURE__ */ jsxs("div", {
 		className: "flex flex-wrap items-center justify-between gap-3",
 		children: [/* @__PURE__ */ jsx("h1", {
-			className: "text-2xl font-bold tracking-tight md:text-[28px]",
+			className: "text-2xl font-bold tracking-tight md:text-[1.75rem]",
 			children: title
 		}), /* @__PURE__ */ jsxs("div", {
 			className: "flex w-full flex-wrap gap-2 sm:w-auto",
@@ -4852,18 +4852,18 @@ function Header({ title, onExport, onReconcile, primaryLabel, onPrimary }) {
 }
 function Kpi({ icon, label, value, sub, bar, accent, breakdown }) {
 	return /* @__PURE__ */ jsxs("div", {
-		className: "animate-fade-in rounded-2xl border border-border bg-surface p-5 shadow-[0_2px_8px_rgba(167,67,255,0.06)] transition hover:-translate-y-0.5 hover:shadow-[0_8px_25px_rgba(167,67,255,0.1)]",
+		className: "animate-fade-in rounded-2xl border border-border bg-surface p-5 shadow-[0_0.125rem_0.5rem_rgba(167,67,255,0.06)] transition hover:-translate-y-0.5 hover:shadow-[0_0.5rem_1.5625rem_rgba(167,67,255,0.1)]",
 		children: [
 			/* @__PURE__ */ jsx("div", {
 				className: cn("mb-3 flex h-10 w-10 items-center justify-center rounded-xl", accent ? "bg-gradient-to-br from-primary to-primary-light text-white" : "bg-purple-100 text-primary"),
 				children: icon
 			}),
 			/* @__PURE__ */ jsx("div", {
-				className: "text-[11px] font-semibold uppercase tracking-wide text-muted",
+				className: "text-[0.6875rem] font-semibold uppercase tracking-wide text-muted",
 				children: label
 			}),
 			/* @__PURE__ */ jsx("div", {
-				className: "mt-1 text-[28px] font-bold leading-none",
+				className: "mt-1 text-[1.75rem] font-bold leading-none",
 				children: value
 			}),
 			sub && /* @__PURE__ */ jsx("div", {
@@ -4878,7 +4878,7 @@ function Kpi({ icon, label, value, sub, bar, accent, breakdown }) {
 						className: "text-base font-bold text-primary",
 						children: row.value
 					}), /* @__PURE__ */ jsx("div", {
-						className: "text-[10px] font-semibold uppercase tracking-wide text-muted",
+						className: "text-[0.625rem] font-semibold uppercase tracking-wide text-muted",
 						children: row.label
 					})]
 				}, row.label))
@@ -5073,7 +5073,7 @@ function CallsTable({ calls, agents, customers, onEdit, onDelete, compact }) {
 		children: /* @__PURE__ */ jsxs("table", {
 			className: "w-full text-sm",
 			children: [/* @__PURE__ */ jsx("thead", { children: /* @__PURE__ */ jsxs("tr", {
-				className: "bg-purple-50 text-left text-[11px] font-semibold uppercase tracking-wide text-muted",
+				className: "bg-purple-50 text-left text-[0.6875rem] font-semibold uppercase tracking-wide text-muted",
 				children: [
 					/* @__PURE__ */ jsx("th", {
 						className: "px-4 py-3",
@@ -5167,7 +5167,7 @@ function CallsTable({ calls, agents, customers, onEdit, onDelete, compact }) {
 							children: /* @__PURE__ */ jsx(Stars, { rating: qaScore(c) })
 						}),
 						/* @__PURE__ */ jsx("td", {
-							className: "max-w-[180px] truncate px-4 py-3 text-xs text-muted",
+							className: "max-w-[11.25rem] truncate px-4 py-3 text-xs text-muted",
 							title: c.notes || void 0,
 							children: shortNotes(c.notes)
 						}),

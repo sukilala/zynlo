@@ -39,7 +39,7 @@ export function Avatar({ name }: { name: string }) {
     .map((p) => p[0]?.toUpperCase() ?? "")
     .join("");
   return (
-    <span className="inline-flex h-8 w-8 shrink-0 items-center justify-center rounded-full bg-gradient-to-br from-primary to-primary-light text-xs font-bold text-white shadow-[0_2px_8px_rgba(167,67,255,0.35)]">
+    <span className="inline-flex h-8 w-8 shrink-0 items-center justify-center rounded-full bg-gradient-to-br from-primary to-primary-light text-xs font-bold text-white shadow-[0_0.125rem_0.5rem_rgba(167,67,255,0.35)]">
       {initials || "?"}
     </span>
   );
@@ -58,7 +58,7 @@ export function Btn({
 }) {
   const variants = {
     primary:
-      "bg-primary text-white shadow-[0_4px_15px_rgba(167,67,255,0.35)] hover:bg-primary-dark",
+      "bg-primary text-white shadow-[0_0.25rem_0.9375rem_rgba(167,67,255,0.35)] hover:bg-primary-dark",
     secondary:
       "bg-surface border border-border text-fg hover:border-primary hover:text-primary",
     ghost: "bg-transparent text-muted hover:bg-purple-50 hover:text-primary",
@@ -74,7 +74,7 @@ export function Btn({
     <button
       type={type}
       className={cn(
-        "inline-flex items-center justify-center gap-2 rounded-[10px] font-semibold transition-all disabled:cursor-not-allowed disabled:opacity-50",
+        "inline-flex items-center justify-center gap-2 rounded-[0.625rem] font-semibold transition-all disabled:cursor-not-allowed disabled:opacity-50",
         variants[variant],
         sizes[size],
         className,
@@ -96,7 +96,7 @@ export function Card({
   return (
     <div
       className={cn(
-        "overflow-hidden rounded-2xl border border-border bg-surface shadow-[0_2px_16px_rgba(0,0,0,0.28)]",
+        "overflow-hidden rounded-2xl border border-border bg-surface shadow-[0_0.125rem_1rem_rgba(0,0,0,0.28)]",
         className,
       )}
     >
@@ -140,7 +140,7 @@ export function Field({
 }
 
 export const inputClass =
-  "w-full rounded-[10px] border border-border bg-bg px-3.5 py-2.5 text-base text-fg md:text-sm outline-none transition focus:border-primary focus:shadow-[0_0_0_3px_rgba(167,67,255,0.25)]";
+  "w-full rounded-[0.625rem] border border-border bg-bg px-3.5 py-2.5 text-base text-fg md:text-sm outline-none transition focus:border-primary focus:shadow-[0_0_0_0.1875rem_rgba(167,67,255,0.25)]";
 
 export function Modal({
   open,
@@ -167,7 +167,7 @@ export function Modal({
     >
       <div
         className={cn(
-          "max-h-[90vh] w-full overflow-y-auto rounded-[20px] bg-surface shadow-[0_25px_80px_rgba(0,0,0,0.55)]",
+          "max-h-[90vh] w-full overflow-y-auto rounded-[1.25rem] bg-surface shadow-[0_1.5625rem_5rem_rgba(0,0,0,0.55)]",
           wide ? "max-w-2xl" : "max-w-lg",
         )}
         role="dialog"
@@ -178,7 +178,7 @@ export function Modal({
           <button
             type="button"
             onClick={onClose}
-            className="flex h-9 w-9 items-center justify-center rounded-[10px] text-muted hover:bg-bg hover:text-primary"
+            className="flex h-9 w-9 items-center justify-center rounded-[0.625rem] text-muted hover:bg-bg hover:text-primary"
             aria-label="Close"
           >
             <X className="h-5 w-5" />
@@ -238,7 +238,7 @@ export function ToastStack({
       {toasts.map((t) => (
         <div
           key={t.id}
-          className="pointer-events-auto animate-slide-in flex min-w-[260px] max-w-sm items-center gap-2 rounded-xl border border-border border-l-4 border-l-primary bg-surface px-4 py-3 text-sm font-medium shadow-lg"
+          className="pointer-events-auto animate-slide-in flex min-w-[16.25rem] max-w-sm items-center gap-2 rounded-xl border border-border border-l-4 border-l-primary bg-surface px-4 py-3 text-sm font-medium shadow-lg"
           onClick={() => onDismiss(t.id)}
         >
           {t.message}
