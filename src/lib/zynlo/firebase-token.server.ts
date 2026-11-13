@@ -1,4 +1,5 @@
 import { importPKCS8, SignJWT } from "jose";
+import { singleFlight } from "./single-flight";
 
 type ServiceAccount = {
   client_email: string;
@@ -9,9 +10,7 @@ let accountPromise: Promise<ServiceAccount> | null = null;
 
 function readProcessEnv(): string | undefined {
   const value =
-    typeof process !== "undefined"
-      ? process.env.FIREBASE_SERVICE_ACCOUNT_JSON
-      : undefined;
+    typeof process !== "undefined" ? process.env.FIREBASE_SERVICE_ACCOUNT_JSON : undefined;
   return value && value.trim() ? value : undefined;
 }
 
@@ -49,9 +48,7 @@ function parseServiceAccount(raw: string): ServiceAccount {
   }
   const account = parsed as ServiceAccount;
   if (!account.client_email || !account.private_key) {
-    throw new Error(
-      "FIREBASE_SERVICE_ACCOUNT_JSON is missing client_email or private_key",
-    );
+    throw new Error("FIREBASE_SERVICE_ACCOUNT_JSON is missing client_email or private_key");
   }
   account.private_key = account.private_key.replace(/\\n/g, "\n");
   return account;
@@ -60,10 +57,7 @@ function parseServiceAccount(raw: string): ServiceAccount {
 async function loadServiceAccount(): Promise<ServiceAccount> {
   if (!accountPromise) {
     accountPromise = (async () => {
-      const raw =
-        readProcessEnv() ||
-        (await readCloudflareEnv()) ||
-        (await readDevFile());
+      const raw = readProcessEnv() || (await readCloudflareEnv()) || (await readDevFile());
       if (!raw) {
         throw new Error(
           "Firebase credentials missing. Set the FIREBASE_SERVICE_ACCOUNT_JSON secret (full service-account JSON).",
@@ -79,11 +73,21 @@ async function loadServiceAccount(): Promise<ServiceAccount> {
 }
 
 let cache: { token: string; exp: number } | null = null;
+let signingKey: CryptoKey | null = null;
+let signingPem: string | null = null;
+const mintSlot: { current: Promise<string> | null } = { current: null };
 
-export async function getFirebaseAccessToken(): Promise<string> {
-  if (cache && cache.exp > Date.now() + 60_000) return cache.token;
+async function signingKeyFor(pem: string): Promise<CryptoKey> {
+  if (signingKey && signingPem === pem) return signingKey;
+  const key = await importPKCS8(pem, "RS256");
+  signingKey = key;
+  signingPem = pem;
+  return key;
+}
+
+async function mintFirebaseAccessToken(): Promise<string> {
   const serviceAccount = await loadServiceAccount();
-  const key = await importPKCS8(serviceAccount.private_key, "RS256");
+  const key = await signingKeyFor(serviceAccount.private_key);
   const now = Math.floor(Date.now() / 1000);
   const assertion = await new SignJWT({
     scope:
@@ -114,4 +118,10 @@ export async function getFirebaseAccessToken(): Promise<string> {
     exp: Date.now() + Math.max(60, json.expires_in) * 1000,
   };
   return json.access_token;
+}
+
+/** Module-scope access token. The RS256 key is imported once per isolate. */
+export async function getFirebaseAccessToken(): Promise<string> {
+  if (cache && cache.exp > Date.now() + 60_000) return cache.token;
+  return singleFlight(mintSlot, mintFirebaseAccessToken);
 }

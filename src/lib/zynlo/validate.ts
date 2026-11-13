@@ -1,6 +1,7 @@
 import { z } from "zod";
 import { ClientSafeError } from "./client-error";
 import { isSafeRecordId } from "./ids";
+import { MERGE_BATCH } from "./records";
 
 const recordId = z.string().refine(isSafeRecordId, "Invalid record id");
 const optionalId = z
@@ -87,7 +88,33 @@ export const saveMessageInput = z.object({
 });
 
 export const idInput = z.object({ id: recordId });
-export const mergeInput = z.object({ keepId: recordId, dropId: recordId });
+
+const pageCursor = z
+  .string()
+  .max(80)
+  .regex(/^[A-Za-z0-9_-]+$/)
+  .nullable()
+  .optional();
+
+export const pageInput = z.object({
+  collection: z.enum(["agents", "customers", "clients", "calls", "messages"]),
+  cursor: pageCursor,
+});
+
+const mergeIds = z.array(recordId).max(MERGE_BATCH);
+
+export const mergeInput = z
+  .object({
+    keepId: recordId,
+    dropId: recordId,
+    callIds: mergeIds.optional(),
+    messageIds: mergeIds.optional(),
+    removeDropped: z.boolean().optional(),
+  })
+  .refine(
+    (value) => (value.callIds?.length ?? 0) + (value.messageIds?.length ?? 0) <= MERGE_BATCH,
+    "Too many records",
+  );
 
 export function parseInput<T>(schema: z.ZodType<T>, data: unknown): T {
   const result = schema.safeParse(data);

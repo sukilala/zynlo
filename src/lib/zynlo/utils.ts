@@ -1,5 +1,13 @@
-import type { Agent, Call, Client, Customer, Message, QaKey, QaParts, ZynloData } from "./types";
-import { QA_PARTS } from "./types";
+import {
+  QA_PARTS,
+  type Agent,
+  type Call,
+  type Client,
+  type Customer,
+  type Message,
+  type QaKey,
+  type ZynloData,
+} from "./types.ts";
 
 export function formatDate(d: string | undefined | null): string {
   if (!d) return "-";
