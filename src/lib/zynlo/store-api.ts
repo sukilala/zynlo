@@ -7,19 +7,13 @@ import {
   firebaseDeleteClient,
   firebaseDeleteCustomer,
   firebaseDeleteMessage,
-  firebaseLoadAll,
-  firebaseMergeCustomers,
+  firebaseMergeBatch,
   firebaseUpsertAgent,
   firebaseUpsertCall,
   firebaseUpsertClient,
   firebaseUpsertCustomer,
   firebaseUpsertMessage,
 } from "./firebase";
-import type { ZynloData } from "./types";
-
-export async function loadAll(): Promise<ZynloData> {
-  return firebaseLoadAll();
-}
 
 export async function upsertAgent(body: Record<string, unknown>) {
   return firebaseUpsertAgent({
@@ -113,6 +107,18 @@ export async function removeMessage(id: string) {
   await firebaseDeleteMessage(id);
 }
 
-export async function mergeCustomers(keepId: string, dropId: string) {
-  await firebaseMergeCustomers(keepId, dropId);
+export async function mergeCustomers(
+  keepId: string,
+  dropId: string,
+  callIds: string[] = [],
+  messageIds: string[] = [],
+  removeDropped = false,
+) {
+  await firebaseMergeBatch({
+    keepId,
+    dropId,
+    callIds,
+    messageIds,
+    removeDropped,
+  });
 }

@@ -5,8 +5,8 @@ import {
   firebaseDeleteClient,
   firebaseDeleteCustomer,
   firebaseDeleteMessage,
-  firebaseLoadAll,
-  firebaseMergeCustomers,
+  firebaseMergeBatch,
+  firebaseReadPage,
   firebaseUpsertAgent,
   firebaseUpsertCall,
   firebaseUpsertClient,
@@ -14,10 +14,12 @@ import {
   firebaseUpsertMessage,
 } from "./firebase";
 import { toClientError } from "./client-error";
-import type { Agent, Call, Client, Customer, Message, ZynloData } from "./types";
+import type { DataPage } from "./records";
+import type { Agent, Call, Client, Customer, Message } from "./types";
 import {
   idInput,
   mergeInput,
+  pageInput,
   parseInput,
   saveAgentInput,
   saveCallInput,
@@ -30,10 +32,6 @@ function hideAgent(agent: Agent): Agent {
   const copy = { ...agent };
   delete copy.passwordHash;
   return copy;
-}
-
-function hideSecrets(data: ZynloData): ZynloData {
-  return { ...data, agents: data.agents.map(hideAgent) };
 }
 
 const crmFn = createMiddleware({ type: "function" })
@@ -62,11 +60,16 @@ export const whoAmI = createServerFn({ method: "GET" })
     return { agentId: agent.id, email: agent.email, name: agent.name };
   });
 
-export const getAllData = createServerFn({ method: "GET" })
+export const getDataPage = createServerFn({ method: "GET" })
   .middleware([crmFn])
-  .handler(async (): Promise<ZynloData> => {
+  .validator((data: unknown) => parseInput(pageInput, data))
+  .handler(async ({ data }): Promise<DataPage> => {
     await requireAgent();
-    return hideSecrets(await firebaseLoadAll());
+    const page = await firebaseReadPage(data.collection, data.cursor ?? null);
+    if (page.collection === "agents") {
+      return { ...page, items: page.items.map(hideAgent) };
+    }
+    return page;
   });
 
 export const saveAgent = createServerFn({ method: "POST" })
@@ -160,6 +163,12 @@ export const mergeCustomers = createServerFn({ method: "POST" })
   .validator((data: unknown) => parseInput(mergeInput, data))
   .handler(async ({ data }) => {
     await requireAgent();
-    await firebaseMergeCustomers(data.keepId, data.dropId);
+    await firebaseMergeBatch({
+      keepId: data.keepId,
+      dropId: data.dropId,
+      callIds: data.callIds ?? [],
+      messageIds: data.messageIds ?? [],
+      removeDropped: data.removeDropped ?? false,
+    });
     return { ok: true };
   });

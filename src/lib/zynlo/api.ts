@@ -8,7 +8,7 @@ export {
   deleteClient,
   deleteCustomer,
   deleteMessage,
-  getAllData,
+  getDataPage,
   mergeCustomers,
   saveAgent,
   saveCall,

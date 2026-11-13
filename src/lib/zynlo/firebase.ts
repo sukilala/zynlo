@@ -1,68 +1,50 @@
 /**
  * Shared Zynlo workspace on Firebase Realtime Database.
- * Sole persistence for CRM data - no local / PGlite / Neon / disk snapshots.
+ * Reads are one page per request. Writes touch a single record.
  */
 import { ClientSafeError } from "./client-error";
 import { assertRecordId } from "./ids";
-import type {
-  Agent,
-  Call,
-  Client,
-  Customer,
-  Message,
-  QaParts,
-  ZynloData,
-} from "./types";
-import { QA_PARTS } from "./types";
-import { weightedQa } from "./utils";
+import {
+  mapAgent,
+  mapCall,
+  mapClient,
+  mapCustomer,
+  mapMessage,
+  MERGE_BATCH,
+  pageFromRaw,
+  parseStoredQa,
+  RTDB_PAGE_SIZE,
+  rtdbPageQuery,
+  type CollectionName,
+  type DataPage,
+} from "./records";
+import { singleFlight } from "./single-flight";
+import type { Agent, Call, Client, Customer, Message, QaParts } from "./types";
 
-const RTDB_ROOT =
-  "https://zynlo-crm-default-rtdb.firebaseio.com";
+const RTDB_ROOT = "https://zynlo-crm-default-rtdb.firebaseio.com";
 
-function parseQa(raw: unknown): QaParts | null {
-  if (!raw || typeof raw !== "object") return null;
-  const src = raw as Record<string, unknown>;
-  const out = {} as QaParts;
-  for (const part of QA_PARTS) {
-    const n = Number(src[part.key]);
-    if (!Number.isFinite(n) || n < 1 || n > 10) return null;
-    out[part.key] = n;
-  }
-  return out;
-}
+/**
+ * Uncompressed page body. A 500-record page with ordinary notes fits.
+ * Anything larger is cancelled before JSON.parse.
+ */
+const MAX_PAGE_BYTES = 2 * 1024 * 1024;
 
-const COLLECTIONS = [
-  "agents",
-  "customers",
-  "clients",
-  "calls",
-  "messages",
-] as const;
-
-type Collection = (typeof COLLECTIONS)[number];
-
-const collectionCache: Partial<
-  Record<Collection, { etag: string; data: unknown }>
-> = {};
-let mappedCache: { at: number; data: ZynloData } | null = null;
-let cacheGen = 0;
-
-function invalidateCache(col?: Collection) {
-  cacheGen += 1;
-  mappedCache = null;
-  if (col) delete collectionCache[col];
-  else {
-    for (const c of COLLECTIONS) delete collectionCache[c];
-  }
-}
+const AGENT_TTL_MS = 60_000;
 
 function uid() {
   return crypto.randomUUID();
 }
 
-async function authedHeaders(
-  base: Record<string, string>,
-): Promise<Record<string, string>> {
+class PageTooLargeError extends Error {
+  declared: number;
+  constructor(declared = 0) {
+    super("page");
+    this.name = "PageTooLargeError";
+    this.declared = declared;
+  }
+}
+
+async function authedHeaders(base: Record<string, string>): Promise<Record<string, string>> {
   if (typeof window !== "undefined") {
     throw new ClientSafeError("Something went wrong. Try again.");
   }
@@ -71,12 +53,9 @@ async function authedHeaders(
   return { ...base, Authorization: `Bearer ${token}` };
 }
 
-async function rtdbFetch<T>(
-  path: string,
-  init?: RequestInit,
-): Promise<T> {
-  const url = `${RTDB_ROOT}${path.startsWith("/") ? path : `/${path}`}`;
-  const res = await fetch(url, {
+async function firebaseFetch(pathAndQuery: string, init?: RequestInit): Promise<Response> {
+  const path = pathAndQuery.startsWith("/") ? pathAndQuery : `/${pathAndQuery}`;
+  const res = await fetch(`${RTDB_ROOT}${path}`, {
     ...init,
     headers: await authedHeaders({
       Accept: "application/json",
@@ -86,299 +65,136 @@ async function rtdbFetch<T>(
     cache: "no-store",
   });
   if (!res.ok) {
-    console.error(
-      `[zynlo] firebase ${init?.method || "GET"} failed (${res.status})`,
-    );
+    await res.body?.cancel();
+    console.error(`[zynlo] firebase ${init?.method || "GET"} failed (${res.status})`);
     throw new ClientSafeError("Something went wrong. Try again.");
   }
-  if ((init?.method || "GET").toUpperCase() === "DELETE") return null as T;
+  return res;
+}
+
+async function readBounded(res: Response, maxBytes: number): Promise<string> {
+  const declared = Number(res.headers.get("content-length") || 0);
+  if (declared > maxBytes) {
+    await res.body?.cancel();
+    throw new PageTooLargeError(declared);
+  }
+  if (!res.body) {
+    const text = await res.text();
+    if (text.length > maxBytes) throw new PageTooLargeError(text.length);
+    return text;
+  }
+  const reader = res.body.getReader();
+  const chunks: Uint8Array[] = [];
+  let received = 0;
+  while (true) {
+    const { done, value } = await reader.read();
+    if (done) break;
+    received += value.byteLength;
+    if (received > maxBytes) {
+      await reader.cancel();
+      throw new PageTooLargeError(received);
+    }
+    chunks.push(value);
+  }
+  const buf = new Uint8Array(received);
+  let offset = 0;
+  for (const chunk of chunks) {
+    buf.set(chunk, offset);
+    offset += chunk.byteLength;
+  }
+  return new TextDecoder().decode(buf);
+}
+
+async function rtdbFetch<T>(path: string, init?: RequestInit): Promise<T> {
+  const res = await firebaseFetch(path, init);
+  if ((init?.method || "GET").toUpperCase() === "DELETE") {
+    await res.body?.cancel();
+    return null as T;
+  }
   const text = await res.text();
   if (!text || text === "null") return null as T;
   return JSON.parse(text) as T;
 }
 
-/** Turn list or sparse numeric-key object into id-keyed map. */
-function toIdMap(
-  raw: unknown,
-): Record<string, Record<string, unknown>> {
-  if (!raw) return {};
-  if (Array.isArray(raw)) {
-    const m: Record<string, Record<string, unknown>> = {};
-    for (const item of raw) {
-      if (!item || typeof item !== "object") continue;
-      const row = item as Record<string, unknown>;
-      const id = String(row.id || uid());
-      m[id] = { ...row, id };
-    }
-    return m;
-  }
-  if (typeof raw === "object") {
-    const m: Record<string, Record<string, unknown>> = {};
-    for (const [key, item] of Object.entries(
-      raw as Record<string, unknown>,
-    )) {
-      if (!item || typeof item !== "object") continue;
-      const row = item as Record<string, unknown>;
-      const id = String(row.id || key);
-      // Skip pure numeric keys that already have id field content handled
-      m[id] = { ...row, id };
-    }
-    return m;
-  }
-  return {};
+async function readPageLimit(
+  collection: CollectionName,
+  cursor: string | null,
+  limit: number,
+): Promise<DataPage> {
+  const query = rtdbPageQuery(cursor, limit);
+  const res = await firebaseFetch(`/${collection}.json?${query}`);
+  const text = await readBounded(res, MAX_PAGE_BYTES);
+  const raw = !text || text === "null" ? null : JSON.parse(text);
+  return pageFromRaw(collection, raw, cursor, limit);
 }
 
-function needsMigration(raw: unknown): boolean {
-  if (raw == null) return false;
-  if (Array.isArray(raw)) return true;
-  if (typeof raw === "object") {
-    const keys = Object.keys(raw as object);
-    // Numeric keys mean former array
-    return keys.some((k) => /^\d+$/.test(k));
+export async function firebaseReadPage(
+  collection: CollectionName,
+  cursor: string | null,
+): Promise<DataPage> {
+  let limit = RTDB_PAGE_SIZE;
+  for (let attempt = 0; attempt < 3; attempt++) {
+    try {
+      return await readPageLimit(collection, cursor, limit);
+    } catch (err) {
+      if (!(err instanceof PageTooLargeError)) throw err;
+      const farTooBig = err.declared > MAX_PAGE_BYTES * 4;
+      if (farTooBig || limit <= 8) {
+        console.error("[zynlo] firebase page too large");
+        throw new ClientSafeError("Something went wrong. Try again.");
+      }
+      limit = Math.max(8, Math.floor(limit / 2));
+    }
   }
-  return false;
+  console.error("[zynlo] firebase page too large");
+  throw new ClientSafeError("Something went wrong. Try again.");
 }
 
-let migratePromise: Promise<void> | null = null;
+let agentCache: { at: number; agents: Agent[] } | null = null;
+let agentGen = 0;
+const agentSlot: { current: Promise<Agent[]> | null } = { current: null };
+
+function invalidateAgentCache() {
+  agentCache = null;
+  agentGen += 1;
+}
+
+export async function firebaseListAgents(): Promise<Agent[]> {
+  if (agentCache && Date.now() - agentCache.at < AGENT_TTL_MS) return agentCache.agents;
+  return singleFlight(agentSlot, async () => {
+    if (agentCache && Date.now() - agentCache.at < AGENT_TTL_MS) {
+      return agentCache.agents;
+    }
+    const gen = agentGen;
+    const agents: Agent[] = [];
+    let cursor: string | null = null;
+    for (let i = 0; i < 20; i++) {
+      const page = await firebaseReadPage("agents", cursor);
+      if (page.collection !== "agents") break;
+      agents.push(...page.items);
+      if (!page.nextCursor) {
+        if (gen === agentGen) agentCache = { at: Date.now(), agents };
+        return agents;
+      }
+      cursor = page.nextCursor;
+    }
+    throw new ClientSafeError("Something went wrong. Try again.");
+  });
+}
 
 /** One-time (per process) convert array collections → maps by id. */
-async function rtdbGetCollection(col: Collection): Promise<unknown> {
-  const path = `/${col}.json`;
-  const url = `${RTDB_ROOT}${path}`;
-  const prev = collectionCache[col];
-  const headers = await authedHeaders({
-    Accept: "application/json",
-    "X-Firebase-ETag": "true",
-    ...(prev?.etag ? { "If-None-Match": prev.etag } : {}),
-  });
-  const res = await fetch(url, { headers, cache: "no-store" });
-  if (res.status === 304 && prev) return prev.data;
-  if (!res.ok) {
-    console.error(`[zynlo] firebase GET failed (${res.status})`);
-    throw new ClientSafeError("Something went wrong. Try again.");
-  }
-  const etag = res.headers.get("ETag") || res.headers.get("etag") || "";
-  const text = await res.text();
-  const data = !text || text === "null" ? null : JSON.parse(text);
-  if (etag) collectionCache[col] = { etag, data };
-  return data;
-}
-
-async function loadCollections(): Promise<Record<string, unknown>> {
-  const entries = await Promise.all(
-    COLLECTIONS.map(async (col) => {
-      const raw = await rtdbGetCollection(col);
-      return [col, raw] as const;
-    }),
-  );
-  const root: Record<string, unknown> = {};
-  for (const [col, raw] of entries) root[col] = raw;
-  return root;
-}
-
 export async function ensureFirebaseMaps(): Promise<void> {
   // Never rewrite a whole collection. That path used to PUT /calls.json
   // and could wipe saved calls.
 }
 
-function mapAgent(r: Record<string, unknown>): Agent {
-  return {
-    id: String(r.id),
-    name: String(r.name || ""),
-    email: String(r.email || ""),
-    role: String(r.role || "Agent"),
-    status: (r.status as Agent["status"]) || "Active",
-    passwordHash: r.passwordHash ? String(r.passwordHash) : "",
-  };
-}
-
-export async function firebaseListAgents(): Promise<Agent[]> {
-  const raw = await rtdbFetch<unknown>("/agents.json");
-  return valuesSorted(toIdMap(raw), "name").map((row) =>
-    mapAgent(row as Record<string, unknown>),
-  );
-}
-
-function mapCustomer(r: Record<string, unknown>): Customer {
-  return {
-    id: String(r.id),
-    name: String(r.name || ""),
-    phone: String(r.phone || ""),
-    email: String(r.email || ""),
-    company: String(r.company || ""),
-    clientId: r.clientId ? String(r.clientId) : null,
-    notes: String(r.notes || ""),
-  };
-}
-
-function mapClient(r: Record<string, unknown>): Client {
-  return {
-    id: String(r.id),
-    name: String(r.name || ""),
-    industry: String(r.industry || ""),
-    phone: String(r.phone || ""),
-    email: String(r.email || ""),
-    website: String(r.website || ""),
-    status: (r.status as Client["status"]) || "Active",
-    address: String(r.address || ""),
-    notes: String(r.notes || ""),
-  };
-}
-
-function mapCall(
-  r: Record<string, unknown>,
-  clientIdOverride?: string | null,
-): Call {
-  const qa = parseQa(r.qa);
-  const weighted = weightedQa(qa);
-  const rawRating =
-    r.rating == null || r.rating === "" ? null : Number(r.rating);
-  const rating =
-    weighted != null
-      ? weighted
-      : rawRating != null && Number.isFinite(rawRating)
-        ? rawRating
-        : null;
-  const hidden =
-    r.csvCounted === false || String(r.csvCounted).toLowerCase() === "false";
-  return {
-    id: String(r.id),
-    datetime: String(r.datetime || ""),
-    agentId: String(r.agentId || ""),
-    customerId: String(r.customerId || ""),
-    clientId:
-      clientIdOverride !== undefined
-        ? clientIdOverride
-        : r.clientId
-          ? String(r.clientId)
-          : null,
-    type: (r.type as Call["type"]) || "Inbound",
-    duration: Number(r.duration) || 0,
-    outcome: (r.outcome as Call["outcome"]) || "Resolved",
-    rating,
-    ratingScale:
-      weighted != null || r.ratingScale === 10 || (rating != null && rating > 5)
-        ? 10
-        : rating == null
-          ? undefined
-          : 5,
-    qa,
-    notes: String(r.notes || ""),
-    followUpAt: r.followUpAt ? String(r.followUpAt).slice(0, 10) : null,
-    source: r.source === "telecom" ? "telecom" : "manual",
-    csvCounted: hidden ? false : true,
-  };
-}
-
-function mapMessage(r: Record<string, unknown>): Message {
-  return {
-    id: String(r.id),
-    datetime: String(r.datetime || ""),
-    agentId: String(r.agentId || ""),
-    customerId: String(r.customerId || ""),
-    clientId: r.clientId ? String(r.clientId) : null,
-    channel: (r.channel as Message["channel"]) || "SMS",
-    direction: (r.direction as Message["direction"]) || "Inbound",
-    subject: String(r.subject || ""),
-    body: String(r.body || ""),
-    status: (r.status as Message["status"]) || "Open",
-    notes: String(r.notes || ""),
-    followUpAt: r.followUpAt ? String(r.followUpAt).slice(0, 10) : null,
-  };
-}
-
-function valuesSorted(
-  map: Record<string, Record<string, unknown>>,
-  by: "name" | "datetime",
-): Record<string, unknown>[] {
-  const list = Object.values(map);
-  if (by === "name") {
-    return list.sort((a, b) =>
-      String(a.name || "").localeCompare(String(b.name || "")),
-    );
-  }
-  return list.sort(
-    (a, b) =>
-      new Date(String(b.datetime || 0)).getTime() -
-      new Date(String(a.datetime || 0)).getTime(),
-  );
-}
-
-/** Normalize client/company names for fuzzy matching (CC Express variants). */
-function normName(s: string): string {
-  return (s || "").toLowerCase().replace(/[^a-z0-9]/g, "");
-}
-
-function buildClientLookup(clients: Client[]): Map<string, string> {
-  const m = new Map<string, string>();
-  for (const c of clients) {
-    m.set(normName(c.name), c.id);
-  }
-  return m;
-}
-
-function resolveClientId(
-  lookup: Map<string, string>,
-  clientId: unknown,
-  legacyClientName: unknown,
-): string | null {
-  if (clientId) return String(clientId);
-  if (legacyClientName) {
-    const id = lookup.get(normName(String(legacyClientName)));
-    if (id) return id;
-  }
-  return null;
-}
-
-export async function firebaseLoadAll(retries = 0): Promise<ZynloData> {
-  if (mappedCache && Date.now() - mappedCache.at < 20000) {
-    return mappedCache.data;
-  }
-  const gen = cacheGen;
-  const root = await loadCollections();
-  if (gen !== cacheGen && retries < 2) {
-    return firebaseLoadAll(retries + 1);
-  }
-  for (const col of COLLECTIONS) {
-    if (needsMigration(root[col])) {
-      root[col] = toIdMap(root[col]);
-    }
-  }
-
-  const agents = valuesSorted(toIdMap(root.agents), "name").map(mapAgent);
-  const clients = valuesSorted(toIdMap(root.clients), "name").map(mapClient);
-  const clientLookup = buildClientLookup(clients);
-
-  // Use stored clientId only - do not invent links from free-text company
-  // (that re-applied old client names after users entered new ones).
-  const customers = valuesSorted(toIdMap(root.customers), "name").map(mapCustomer);
-
-  const calls = valuesSorted(toIdMap(root.calls), "datetime").map((r) =>
-    mapCall(
-      r,
-      resolveClientId(clientLookup, r.clientId, r.client),
-    ),
-  );
-  const messages = valuesSorted(toIdMap(root.messages), "datetime").map(
-    mapMessage,
-  );
-
-  const data = { agents, customers, clients, calls, messages };
-  if (gen !== cacheGen) {
-    if (retries < 2) return firebaseLoadAll(retries + 1);
-    return data;
-  }
-  mappedCache = { at: Date.now(), data };
-  return data;
-}
-
 async function putItem(
-  collection: Collection,
+  collection: CollectionName,
   id: string,
   row: Record<string, unknown>,
 ): Promise<void> {
   assertRecordId(id);
-  invalidateCache(collection);
+  if (collection === "agents") invalidateAgentCache();
   const payload = { ...row, id, updatedAt: new Date().toISOString() };
   const path = `/${collection}/${encodeURIComponent(id)}.json`;
   const saved = await rtdbFetch<Record<string, unknown> | null>(path, {
@@ -390,12 +206,9 @@ async function putItem(
   }
 }
 
-async function deleteItem(
-  collection: Collection,
-  id: string,
-): Promise<void> {
+async function deleteItem(collection: CollectionName, id: string): Promise<void> {
   assertRecordId(id);
-  invalidateCache(collection);
+  if (collection === "agents") invalidateAgentCache();
   await rtdbFetch(`/${collection}/${encodeURIComponent(id)}.json`, {
     method: "DELETE",
   });
@@ -444,7 +257,7 @@ export async function firebasePatchAgent(
   if (patch.email) body.email = patch.email;
   if (patch.role) body.role = patch.role;
   if (Object.keys(body).length === 0) return;
-  invalidateCache("agents");
+  invalidateAgentCache();
   await rtdbFetch(`/agents/${encodeURIComponent(id)}.json`, {
     method: "PATCH",
     body: JSON.stringify(body),
@@ -569,28 +382,9 @@ export async function firebaseUpsertCall(input: {
     throw new ClientSafeError("Datetime and customer are required");
   }
   const id = input.id || uid();
-  let prev: Record<string, unknown> | null = null;
-  if (input.id) {
-    const cached = mappedCache?.data.calls.find((c) => c.id === id);
-    if (cached) prev = cached as unknown as Record<string, unknown>;
-    if (
-      input.csvCounted !== true &&
-      input.csvCounted !== false &&
-      prev?.csvCounted !== true &&
-      prev?.csvCounted !== false
-    ) {
-      const live = await rtdbFetch<Record<string, unknown> | null>(
-        `/calls/${encodeURIComponent(id)}.json`,
-      );
-      if (live && typeof live === "object") {
-        prev = { ...(prev || {}), ...live };
-      }
-    } else if (!prev) {
-      prev = await rtdbFetch<Record<string, unknown> | null>(
-        `/calls/${encodeURIComponent(id)}.json`,
-      );
-    }
-  }
+  const prev = input.id
+    ? await rtdbFetch<Record<string, unknown> | null>(`/calls/${encodeURIComponent(id)}.json`)
+    : null;
   const rating =
     input.rating === undefined
       ? prev && prev.rating != null && prev.rating !== ""
@@ -604,9 +398,7 @@ export async function firebaseUpsertCall(input: {
             return Math.min(10, n);
           })();
   const prevScale =
-    prev?.ratingScale === 5 || prev?.ratingScale === 10
-      ? (prev.ratingScale as 5 | 10)
-      : undefined;
+    prev?.ratingScale === 5 || prev?.ratingScale === 10 ? (prev.ratingScale as 5 | 10) : undefined;
   const row = {
     id,
     datetime: input.datetime,
@@ -619,7 +411,7 @@ export async function firebaseUpsertCall(input: {
     rating,
     ratingScale:
       rating == null
-        ? (prev?.ratingScale as 5 | 10 | null | undefined) ?? null
+        ? ((prev?.ratingScale as 5 | 10 | null | undefined) ?? null)
         : input.ratingScale === 5 && rating <= 5
           ? 5
           : input.ratingScale === 10
@@ -627,19 +419,10 @@ export async function firebaseUpsertCall(input: {
             : prevScale === 5 && rating <= 5
               ? 5
               : 10,
-    qa:
-      input.qa !== undefined
-        ? input.qa
-        : parseQa(prev?.qa),
-    notes:
-      input.notes != null
-        ? String(input.notes).trim()
-        : String(prev?.notes || "").trim(),
+    qa: input.qa !== undefined ? input.qa : parseStoredQa(prev?.qa),
+    notes: input.notes != null ? String(input.notes).trim() : String(prev?.notes || "").trim(),
     followUpAt: input.followUpAt ? String(input.followUpAt).slice(0, 10) : null,
-    source:
-      prev?.source === "telecom" || input.source === "telecom"
-        ? "telecom"
-        : "manual",
+    source: prev?.source === "telecom" || input.source === "telecom" ? "telecom" : "manual",
     csvCounted:
       input.csvCounted === false
         ? false
@@ -701,50 +484,59 @@ export async function firebaseDeleteMessage(id: string): Promise<void> {
   await deleteItem("messages", id);
 }
 
-export async function firebaseMergeCustomers(
-  keepId: string,
+async function moveChild(
+  collection: "calls" | "messages",
+  id: string,
   dropId: string,
+  keepId: string,
+  keepClientId: string | null,
 ): Promise<void> {
-  if (!keepId || !dropId || keepId === dropId) {
+  assertRecordId(id);
+  const row = await rtdbFetch<Record<string, unknown> | null>(
+    `/${collection}/${encodeURIComponent(id)}.json`,
+  );
+  if (!row || typeof row !== "object") return;
+  if (String(row.customerId || "") !== dropId) return;
+  const clientId = row.clientId ? String(row.clientId) : keepClientId;
+  await rtdbFetch(`/${collection}/${encodeURIComponent(id)}.json`, {
+    method: "PATCH",
+    body: JSON.stringify({ customerId: keepId, clientId }),
+  });
+}
+
+/**
+ * Moves one small batch of calls or messages onto the kept customer.
+ * The caller walks every matching id, then sets removeDropped on the last batch.
+ * Does not read the rest of the database.
+ */
+export async function firebaseMergeBatch(input: {
+  keepId: string;
+  dropId: string;
+  callIds: string[];
+  messageIds: string[];
+  removeDropped: boolean;
+}): Promise<void> {
+  if (!input.keepId || !input.dropId || input.keepId === input.dropId) {
     throw new ClientSafeError("Pick two different customers to merge");
   }
-  const data = await firebaseLoadAll();
-  const keep = data.customers.find((c) => c.id === keepId);
-  const drop = data.customers.find((c) => c.id === dropId);
-  if (!keep || !drop) throw new ClientSafeError("Customer not found");
-  for (const call of data.calls.filter((c) => c.customerId === dropId)) {
-    await firebaseUpsertCall({
-      id: call.id,
-      datetime: call.datetime,
-      agentId: call.agentId,
-      customerId: keepId,
-      clientId: call.clientId || keep.clientId,
-      type: call.type,
-      duration: call.duration,
-      outcome: call.outcome,
-      rating: call.rating,
-      ratingScale: call.ratingScale,
-      notes: call.notes,
-      followUpAt: call.followUpAt,
-      source: call.source === "telecom" ? "telecom" : "manual",
-      csvCounted: call.csvCounted,
-    });
+  if (input.callIds.length + input.messageIds.length > MERGE_BATCH) {
+    throw new ClientSafeError("Check the form and try again.");
   }
-  for (const msg of (data.messages || []).filter((m) => m.customerId === dropId)) {
-    await firebaseUpsertMessage({
-      id: msg.id,
-      datetime: msg.datetime,
-      agentId: msg.agentId,
-      customerId: keepId,
-      clientId: msg.clientId || keep.clientId,
-      channel: msg.channel,
-      direction: msg.direction,
-      subject: msg.subject,
-      body: msg.body,
-      status: msg.status,
-      notes: msg.notes,
-      followUpAt: msg.followUpAt,
-    });
+  const keep = await rtdbFetch<Record<string, unknown> | null>(
+    `/customers/${encodeURIComponent(input.keepId)}.json`,
+  );
+  const drop = await rtdbFetch<Record<string, unknown> | null>(
+    `/customers/${encodeURIComponent(input.dropId)}.json`,
+  );
+  if (!keep || !drop || typeof keep !== "object" || typeof drop !== "object") {
+    throw new ClientSafeError("Customer not found");
   }
-  await firebaseDeleteCustomer(dropId);
+  const keepClientId = keep.clientId ? String(keep.clientId) : null;
+  for (const id of input.callIds) {
+    await moveChild("calls", id, input.dropId, input.keepId, keepClientId);
+  }
+  for (const id of input.messageIds) {
+    await moveChild("messages", id, input.dropId, input.keepId, keepClientId);
+  }
+  if (input.removeDropped) await deleteItem("customers", input.dropId);
 }

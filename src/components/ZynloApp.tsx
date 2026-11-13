@@ -43,7 +43,7 @@ import {
   deleteClient as deleteClientRemote,
   deleteCustomer as deleteCustomerRemote,
   deleteMessage as deleteMessageRemote,
-  getAllData,
+  getDataPage,
   mergeCustomers as mergeCustomersRemote,
   saveAgent as saveAgentRemote,
   saveCall as saveCallRemote,
@@ -53,6 +53,7 @@ import {
   whoAmI,
 } from "@/lib/zynlo/api";
 import type { ZynloData } from "@/lib/zynlo/types";
+import { loadPagedWorkspace, mergeBatches } from "@/lib/zynlo/workspace-pages";
 import {
   AGENT_ROLES,
   AGENT_STATUSES,
@@ -127,6 +128,12 @@ import {
 import { cn } from "@/lib/cn";
 import { publicAsset } from "@/lib/zynlo/public-asset";
 
+class StaleWorkspaceLoad extends Error {
+	constructor() {
+		super("Could not load data");
+		this.name = "StaleWorkspaceLoad";
+	}
+}
 const LAST_AGENT_KEY = "zynlo.lastAgentId";
 function readLastAgentId() {
 	try {
@@ -397,17 +404,29 @@ export function ZynloApp({ initial }: { initial: ZynloData }) {
 		setTimeout(() => setToasts((t) => t.filter((x) => x.id !== id)), 3200);
 	}, []);
 	const authEpoch = useRef(0);
+	const loadFresh = useCallback(async () => {
+		const epoch = authEpoch.current;
+		return loadPagedWorkspace(async (collection, cursor) => {
+			if (epoch !== authEpoch.current) throw new StaleWorkspaceLoad();
+			return getDataPage({ data: { collection, cursor } });
+		});
+	}, []);
 	const refresh = useCallback(async () => {
 		const epoch = authEpoch.current;
-		const next = await getAllData();
-		if (epoch !== authEpoch.current) return next;
-		const mapped = {
-			...next,
-			messages: next.messages || []
-		};
-		setData(mapped);
-		return mapped;
-	}, []);
+		try {
+			const next = await loadFresh();
+			if (epoch !== authEpoch.current) return next;
+			const mapped = {
+				...next,
+				messages: next.messages || []
+			};
+			setData(mapped);
+			return mapped;
+		} catch (err) {
+			if (err instanceof StaleWorkspaceLoad) return null;
+			throw err;
+		}
+	}, [loadFresh]);
 	const saveCall = async (args) => {
 		const saved = await saveCallRemote(args);
 		if (saved && saved.id) setData((d) => ({
@@ -494,7 +513,21 @@ export function ZynloApp({ initial }: { initial: ZynloData }) {
 			agents: d.agents.filter((c) => c.id !== id)
 		}));
 	};
-	const mergeCustomers = async (args) => mergeCustomersRemote(args);
+	const mergeCustomers = async (args) => {
+		const fresh = await loadFresh();
+		const keepId = args?.data?.keepId;
+		const dropId = args?.data?.dropId;
+		if (!fresh || !keepId || !dropId) return;
+		const callIds = fresh.calls.filter((c) => c.customerId === dropId).map((c) => c.id);
+		const messageIds = (fresh.messages || []).filter((m) => m.customerId === dropId).map((m) => m.id);
+		for (const batch of mergeBatches(callIds, messageIds)) {
+			await mergeCustomersRemote({ data: {
+				keepId,
+				dropId,
+				...batch
+			} });
+		}
+	};
 	useEffect(() => {
 		const saved = session?.agentId || readLastAgentId();
 		const pool = data.agents;
@@ -512,12 +545,12 @@ export function ZynloApp({ initial }: { initial: ZynloData }) {
 				if (stale()) return;
 				if (!who.agentId) throw new Error("Sign in required");
 				setSession({ agentId: who.agentId });
-				setAccessGate("ready");
 				try {
 					await refresh();
 				} catch (err) {
 					if (!stale()) toast(err instanceof Error ? err.message : "Could not load data");
 				}
+				if (!stale()) setAccessGate("ready");
 			} catch (err) {
 				if (stale()) return;
 				setSession(null);
@@ -582,7 +615,7 @@ export function ZynloApp({ initial }: { initial: ZynloData }) {
 		}
 		setBusy(true);
 		try {
-			const live = await getAllData();
+			const live = await loadFresh();
 			let flipped = 0;
 			await runPool(fixes, 6, async (fix) => {
 				const c = live.calls.find((x) => x.id === fix.callId);
