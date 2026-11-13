@@ -8,8 +8,10 @@ import {
 } from "jose";
 import {
   accessAgentId,
+  isAdminEmail,
   isAllowedAgentEmail,
   nameFromEmail,
+  parseAdminEmails,
   planAgentLink,
 } from "./agent-identity.ts";
 import {
@@ -66,6 +68,19 @@ test("duplicate emails keep the lowest id and do not create another agent", () =
     "susika.vs@gmail.com",
   );
   assert.deepEqual(plan, { kind: "email", id: "a" });
+});
+
+test("admin emails are the two named addresses, case-insensitive", () => {
+  const admins = parseAdminEmails(
+    " Susika.VS@gmail.com, edirisinghayashodha@gmail.com ",
+  );
+  assert.equal(admins.size, 2);
+  assert.equal(isAdminEmail("susika.vs@gmail.com", admins), true);
+  assert.equal(isAdminEmail("EDIRISINGHAYASHODHA@gmail.com", admins), true);
+  assert.equal(isAdminEmail("sivakumarpraveena804@gmail.com", admins), false);
+  assert.equal(isAdminEmail("iamharshika.7@gmail.com", admins), false);
+  assert.equal(parseAdminEmails("").size, 0);
+  assert.equal(parseAdminEmails("not-an-email, ,").size, 0);
 });
 
 test("names from the four roster addresses stay short labels", () => {

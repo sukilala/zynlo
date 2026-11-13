@@ -39,6 +39,27 @@ export function isAllowedAgentEmail(email: string): boolean {
   return (ALLOWED_AGENT_EMAILS as readonly string[]).includes(email);
 }
 
+/** Comma-separated Access emails that sign in as role Admin. */
+export function parseAdminEmails(raw: string | undefined | null): Set<string> {
+  const emails = new Set<string>();
+  if (!raw) return emails;
+  for (const part of raw.split(",")) {
+    const email = canonicalEmail(part);
+    if (email) emails.add(email);
+  }
+  return emails;
+}
+
+export function isAdminEmail(
+  email: string,
+  admins: Set<string> | readonly string[],
+): boolean {
+  const canonical = canonicalEmail(email);
+  if (!canonical) return false;
+  if (admins instanceof Set) return admins.has(canonical);
+  return admins.some((item) => canonicalEmail(item) === canonical);
+}
+
 export function compactIdentity(value: string): string {
   return value.toLowerCase().replace(/[^a-z0-9]/g, "");
 }
