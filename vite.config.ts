@@ -174,7 +174,7 @@ function crmBaseRedirectPlugin(): Plugin {
 // AGENTS.md § "First scaffold".
 // Production builds target Cloudflare Workers (`wrangler.jsonc`). The plugin
 // stays off during `vite dev` so the preview keeps the Node dev server.
-export default defineConfig(({ command }) => ({
+export default defineConfig(({ command, isPreview }) => ({
   base: "/CRM/",
   server: {
     host: "0.0.0.0",
@@ -190,7 +190,7 @@ export default defineConfig(({ command }) => ({
     tsconfigPaths: true,
     // `cloudflare:workers` exists only in workerd. Alias it during `vite dev`
     // so the dependency scan can resolve the credential fallback import.
-    ...(command === "serve"
+    ...(command === "serve" && !isPreview
       ? {
           alias: {
             "cloudflare:workers": fileURLToPath(
@@ -203,7 +203,7 @@ export default defineConfig(({ command }) => ({
   plugins: [
     // First, and only for the Worker build. Left off in dev so Nitro/workerd
     // does not open a second port beside the 8080 preview.
-    ...(command === "build"
+    ...(command === "build" || isPreview
       ? [cloudflare({ viteEnvironment: { name: "ssr" } })]
       : []),
     crmBaseRedirectPlugin(),

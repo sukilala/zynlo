@@ -157,21 +157,25 @@ export function renderInstallPageHtml(template, { host, url } = {}) {
     .replaceAll("{{APP_URL}}", escapeHtml(stripInstallParams(url)));
 }
 
-export function renderWebManifest(hostHeader) {
+export function renderWebManifest(hostHeader, basePath = "/") {
+  const trimmed = String(basePath || "/").trim() || "/";
+  const withSlash = trimmed.endsWith("/") ? trimmed : `${trimmed}/`;
+  const base = withSlash.startsWith("/") ? withSlash : `/${withSlash}`;
+  const prefix = base === "/" ? "" : base.slice(0, -1);
   const name = appNameFromHost(hostHeader);
   return JSON.stringify(
     {
       name,
       short_name: name,
-      id: "/",
-      start_url: "/",
-      scope: "/",
+      id: base,
+      start_url: base,
+      scope: base,
       display: "standalone",
       background_color: "#000000",
       theme_color: "#000000",
       icons: [
         {
-          src: "/__grok/icon-180.png",
+          src: `${prefix}/__grok/icon-180.png`,
           sizes: "180x180",
           type: "image/png",
         },

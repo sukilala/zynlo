@@ -52,7 +52,8 @@ function appPath(pathname) {
 function serveGrokPwa(middlewares) {
   middlewares.use((req, res, next) => {
     const rawUrl = req.url ?? "";
-    const pathOnly = appPath(rawUrl.split("?", 1)[0] ?? "");
+    const rawPath = rawUrl.split("?", 1)[0] ?? "";
+    const pathOnly = appPath(rawPath);
     const method = (req.method ?? "GET").toUpperCase();
     if (method !== "GET") {
       next();
@@ -60,7 +61,8 @@ function serveGrokPwa(middlewares) {
     }
 
     if (pathOnly === "/__grok/manifest.webmanifest" || pathOnly === "/__grok/manifest.json") {
-      const body = Buffer.from(renderWebManifest(requestHost(req)), "utf8");
+      const manifestBase = rawPath === "/CRM" || rawPath.startsWith("/CRM/") ? "/CRM/" : "/";
+      const body = Buffer.from(renderWebManifest(requestHost(req), manifestBase), "utf8");
       res.statusCode = 200;
       res.setHeader("content-type", "application/manifest+json; charset=utf-8");
       res.setHeader("cache-control", "no-cache");
