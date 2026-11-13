@@ -44,16 +44,12 @@ import {
   deleteCustomer as deleteCustomerRemote,
   deleteMessage as deleteMessageRemote,
   getAllData,
-  listAgentNames,
   mergeCustomers as mergeCustomersRemote,
-  resumeSession,
   saveAgent as saveAgentRemote,
   saveCall as saveCallRemote,
   saveClient as saveClientRemote,
   saveCustomer as saveCustomerRemote,
   saveMessage as saveMessageRemote,
-  signInAgent,
-  signOutAgent,
   whoAmI,
 } from "@/lib/zynlo/api";
 import type { ZynloData } from "@/lib/zynlo/types";
@@ -107,11 +103,7 @@ import {
 } from "@/lib/zynlo/utils";
 import { downloadClientPdf } from "@/lib/zynlo/pdf-report";
 import { countLkWorkingDays } from "@/lib/zynlo/lk-workdays";
-import {
-  clearAgentSession,
-  readAgentSession,
-  writeAgentSession,
-} from "@/lib/zynlo/session";
+import { clearLegacyAgentSession } from "@/lib/zynlo/session";
 import {
   buildReconcilePreviewFromRows,
   crmOutcomeForRow,
@@ -326,9 +318,8 @@ export function ZynloApp({ initial }: { initial: ZynloData }) {
 	const [selectedCustomerId, setSelectedCustomerId] = useState(null);
 	const [meAgentId, setMeAgentId] = useState("");
 	const [session, setSession] = useState(null);
-	const [loginAgentId, setLoginAgentId] = useState("");
-	const [loginPassword, setLoginPassword] = useState("");
-	const [loginErr, setLoginErr] = useState("");
+	const [accessGate, setAccessGate] = useState("loading");
+	const [accessMessage, setAccessMessage] = useState("");
 	const [queueScope, setQueueScope] = useState("mine");
 	const [nameOverwrite, setNameOverwrite] = useState("keep");
 	const [quickForm, setQuickForm] = useState({
@@ -376,8 +367,7 @@ export function ZynloApp({ initial }: { initial: ZynloData }) {
 		name: "",
 		email: "",
 		role: "Agent",
-		status: "Active",
-		password: ""
+		status: "Active"
 	});
 	const [customerForm, setCustomerForm] = useState({
 		name: "",
@@ -515,34 +505,25 @@ export function ZynloApp({ initial }: { initial: ZynloData }) {
 		const epoch = ++authEpoch.current;
 		let dead = false;
 		const stale = () => dead || epoch !== authEpoch.current;
-		const last = readLastAgentId();
-		if (last) setLoginAgentId((cur) => cur || last);
+		clearLegacyAgentSession();
 		(async () => {
-			const saved = readAgentSession();
 			try {
-				if (saved?.proof && saved.proof !== "ok") {
-					const resumed = await resumeSession({ data: { agentId: saved.agentId, proof: saved.proof } });
-					if (stale()) return;
-					writeAgentSession(resumed.agentId, "ok");
-					setSession({ agentId: resumed.agentId, proof: "ok" });
-				} else {
-					const who = await whoAmI();
-					if (stale()) return;
-					if (!who.agentId) throw new Error("Sign in required");
-					writeAgentSession(who.agentId, "ok");
-					setSession({ agentId: who.agentId, proof: "ok" });
-				}
-				if (!stale()) await refresh();
-			} catch {
+				const who = await whoAmI();
 				if (stale()) return;
-				clearAgentSession();
-				setSession(null);
+				if (!who.agentId) throw new Error("Sign in required");
+				setSession({ agentId: who.agentId });
+				setAccessGate("ready");
 				try {
-					const names = await listAgentNames();
-					if (!stale()) setData((d) => ({ ...d, agents: names }));
+					await refresh();
 				} catch (err) {
-					if (!stale()) toast(err instanceof Error ? err.message : "Could not load");
+					if (!stale()) toast(err instanceof Error ? err.message : "Could not load data");
 				}
+			} catch (err) {
+				if (stale()) return;
+				setSession(null);
+				setAccessGate("denied");
+				const message = err instanceof Error ? err.message : "";
+				setAccessMessage(message && message.length < 160 ? message : "Cloudflare Access is required.");
 			}
 		})();
 		return () => {
@@ -559,62 +540,6 @@ export function ZynloApp({ initial }: { initial: ZynloData }) {
 	function setWorkingAgent(id) {
 		setMeAgentId(id);
 		writeLastAgentId(id);
-	}
-	async function onLogin(e) {
-		e.preventDefault();
-		const picked = new FormData(e.currentTarget);
-		const agentId = String(picked.get("agentId") || loginAgentId || "").trim();
-		const password = String(picked.get("password") || "");
-		if (!agentId) {
-			setLoginErr("Select your name");
-			return;
-		}
-		if (!password.trim()) {
-			setLoginErr("Enter your password");
-			return;
-		}
-		setBusy(true);
-		setLoginErr("");
-		try {
-			const result = await signInAgent({ data: { agentId, password } });
-			authEpoch.current += 1;
-			writeAgentSession(result.agentId, "ok");
-			setSession({ agentId: result.agentId, proof: "ok" });
-			setWorkingAgent(result.agentId);
-			try {
-				await refresh();
-			} catch (err) {
-				toast(err instanceof Error ? err.message : "Could not load data");
-			}
-		} catch (err) {
-			const message = err instanceof Error ? err.message : "";
-			setLoginErr(message && message.length < 160 ? message : "Wrong password");
-		} finally {
-			setBusy(false);
-		}
-	}
-	function onSignOut() {
-		authEpoch.current += 1;
-		void signOutAgent();
-		clearAgentSession();
-		setSession(null);
-		setData((d) => ({
-			...d,
-			calls: [],
-			customers: [],
-			clients: [],
-			messages: [],
-			agents: d.agents.map((a) => ({
-				id: a.id,
-				name: a.name,
-				email: "",
-				role: a.role,
-				status: a.status
-			}))
-		}));
-		setLoginAgentId(meAgentId || readLastAgentId());
-		setLoginPassword("");
-		setLoginErr("");
 	}
 	async function onReconcileFiles(files) {
 		const list = files.slice(0, 10);
@@ -1154,15 +1079,13 @@ export function ZynloApp({ initial }: { initial: ZynloData }) {
 				name: a.name,
 				email: a.email,
 				role: a.role,
-				status: a.status,
-				password: ""
+				status: a.status
 			});
 		} else setAgentForm({
 			name: "",
 			email: "",
 			role: "Agent",
-			status: "Active",
-			password: ""
+			status: "Active"
 		});
 		if (kind === "customer") if (id) {
 			const c = data.customers.find((x) => x.id === id);
@@ -1373,20 +1296,15 @@ export function ZynloApp({ initial }: { initial: ZynloData }) {
 	}
 	async function onSaveAgent(e) {
 		e.preventDefault();
-		if (!editId && !agentForm.password.trim()) {
-			toast("Set a password for this agent");
-			return;
-		}
 		setBusy(true);
 		try {
-			const id = editId || Date.now().toString(36) + Math.random().toString(36).slice(2, 10);
+			const id = editId || crypto.randomUUID();
 			await saveAgent({ data: {
 				id,
 				name: agentForm.name,
 				email: agentForm.email,
 				role: agentForm.role,
-				status: agentForm.status,
-				password: agentForm.password.trim() || void 0
+				status: agentForm.status
 			} });
 			void refresh();
 			setModal(null);
@@ -1781,13 +1699,12 @@ export function ZynloApp({ initial }: { initial: ZynloData }) {
 	const recentMsgs = messages.slice().sort((a, b) => new Date(b.datetime).getTime() - new Date(a.datetime).getTime()).slice(0, 5);
 	const authedAgent = session ? data.agents.find((a) => a.id === session.agentId) : null;
 	const sessionPending = !!session && data.agents.length === 0;
-	if (!sessionPending && !authedAgent) {
+	if (accessGate === "loading" || (!sessionPending && !authedAgent)) {
 		return /* @__PURE__ */ jsxs("div", {
 			className: "flex min-h-screen items-center justify-center bg-bg px-4 text-fg",
 			children: [
-				/* @__PURE__ */ jsxs("form", {
-					onSubmit: onLogin,
-					className: "w-full max-w-sm space-y-4 rounded-2xl border border-border bg-surface p-6 shadow-[0_12px_40px_rgba(45,27,78,0.18)]",
+				/* @__PURE__ */ jsxs("div", {
+					className: "w-full max-w-sm space-y-4 rounded-2xl border border-border bg-surface p-6 text-center shadow-[0_12px_40px_rgba(45,27,78,0.18)]",
 					children: [
 						/* @__PURE__ */ jsx("img", {
 							src: publicAsset("logo-wordmark.png"),
@@ -1795,55 +1712,14 @@ export function ZynloApp({ initial }: { initial: ZynloData }) {
 							className: "mx-auto h-9 w-auto object-contain"
 						}),
 						/* @__PURE__ */ jsx("p", {
-							className: "text-center text-sm text-muted",
-							children: "Sign in to the workspace"
+							className: "text-sm text-muted",
+							children: accessGate === "loading" ? "Opening the workspace…" : accessMessage || "Cloudflare Access is required."
 						}),
-						/* @__PURE__ */ jsx(Field, {
-							label: "Agent",
-							children: /* @__PURE__ */ jsxs("select", {
-								name: "agentId",
-								required: true,
-								className: inputClass,
-								autoComplete: "username",
-								value: loginAgentId,
-								onChange: (e) => {
-									setLoginAgentId(e.target.value);
-									setLoginErr("");
-								},
-								children: [/* @__PURE__ */ jsx("option", {
-									value: "",
-									children: data.agents.length ? "Select your name" : "Loading…"
-								}), data.agents.map((a) => /* @__PURE__ */ jsx("option", {
-									value: a.id,
-									children: a.name
-								}, a.id))]
-							})
-						}),
-						/* @__PURE__ */ jsx(Field, {
-							label: "Password",
-							children: /* @__PURE__ */ jsx("input", {
-								name: "password",
-								type: "password",
-								required: true,
-								autoComplete: "current-password",
-								className: inputClass,
-								onInput: () => setLoginErr("")
-							})
-						}),
-						loginErr ? /* @__PURE__ */ jsx("p", {
-							className: "text-sm font-semibold text-red-400",
-							children: loginErr
-						}) : null,
-						/* @__PURE__ */ jsx(Btn, {
-							type: "submit",
-							disabled: busy || !data.agents.length,
-							className: "w-full",
-							children: busy ? "Checking…" : "Enter"
-						}),
-						/* @__PURE__ */ jsx("p", {
-							className: "text-center text-[11px] text-muted",
-							children: "This browser stays signed in."
-						})
+						accessGate === "denied" ? /* @__PURE__ */ jsx("a", {
+							href: "/cdn-cgi/access/logout",
+							className: "inline-flex min-h-11 items-center justify-center rounded-lg bg-primary px-4 text-sm font-semibold text-white",
+							children: "Sign out"
+						}) : null
 					]
 				}),
 				/* @__PURE__ */ jsx(ToastStack, {
@@ -1898,10 +1774,9 @@ export function ZynloApp({ initial }: { initial: ZynloData }) {
 						}), /* @__PURE__ */ jsx("div", {
 							className: "truncate text-sm font-semibold text-white",
 							children: authedAgent?.name || "Agent"
-						}), /* @__PURE__ */ jsxs("button", {
-							type: "button",
+						}), /* @__PURE__ */ jsxs("a", {
+							href: "/cdn-cgi/access/logout",
 							className: "mt-2 flex min-h-11 w-full items-center justify-center gap-2 rounded-lg border border-white/10 bg-sidebar px-2 text-sm font-semibold text-white/80 hover:border-primary hover:text-white",
-							onClick: onSignOut,
 							children: [/* @__PURE__ */ jsx(LogOut, { className: "h-4 w-4" }), "Sign out"]
 						})]
 					})
@@ -4245,22 +4120,6 @@ export function ZynloApp({ initial }: { initial: ZynloData }) {
 									status: e.target.value
 								})),
 								children: AGENT_STATUSES.map((s) => /* @__PURE__ */ jsx("option", { children: s }, s))
-							})
-						}),
-						/* @__PURE__ */ jsx(Field, {
-							label: editId ? "New password" : "Password *",
-							className: "sm:col-span-2",
-							children: /* @__PURE__ */ jsx("input", {
-								type: "password",
-								required: !editId,
-								autoComplete: "new-password",
-								className: inputClass,
-								value: agentForm.password,
-								placeholder: editId ? "Leave blank to keep" : "",
-								onChange: (e) => setAgentForm((f) => ({
-									...f,
-									password: e.target.value
-								}))
 							})
 						})
 					]

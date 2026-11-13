@@ -1,5 +1,6 @@
 /**
  * CRM calls go through the server. The browser never talks to Firebase.
+ * The signed-in agent is the email on the Cloudflare Access JWT.
  */
 export {
   deleteAgent,
@@ -8,15 +9,11 @@ export {
   deleteCustomer,
   deleteMessage,
   getAllData,
-  listAgentNames,
   mergeCustomers,
-  resumeSession,
   saveAgent,
   saveCall,
   saveClient,
   saveCustomer,
   saveMessage,
-  signInAgent,
-  signOutAgent,
   whoAmI,
 } from "./server";

@@ -25,7 +25,10 @@ export interface Agent {
   email: string;
   role: string;
   status: AgentStatus;
-  /** SHA-256 of pepper|id|password. Never shown in the UI. */
+  /**
+   * Legacy password hash. Sign-in is Cloudflare Access.
+   * Reads never return this field. Writes never change it.
+   */
   passwordHash?: string;
 }
 

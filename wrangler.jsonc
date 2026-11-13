@@ -11,11 +11,24 @@
   },
   // Static assets are uploaded from the Vite client build. base_path mounts
   // that directory at /CRM so a zone route of zynlo.lk/CRM* can reach them.
-  // Do not add routes here — the zynlo.lk/CRM* route is attached separately.
+  // run_worker_first sends asset requests through the Worker so the Access
+  // JWT is checked before a file is returned. Do not add routes here — the
+  // zynlo.lk/CRM* route is attached separately.
   "assets": {
-    "base_path": "/CRM"
+    "base_path": "/CRM",
+    "binding": "ASSETS",
+    "run_worker_first": true
+  },
+  "vars": {
+    "ACCESS_TEAM_DOMAIN": "zynlo.cloudflareaccess.com",
+    "ACCESS_AUD": "bef128d05837d7d49acd8bb11f65e07633813d13dd6d5239d9773b23a743788c"
   }
   // Secret (not a var — never commit it):
   //   npx wrangler secret put FIREBASE_SERVICE_ACCOUNT_JSON
   // Value is the full Firebase service-account JSON string.
+  //
+  // Local UI without Access: the check is skipped only when ACCESS_TEAM_DOMAIN
+  // and ACCESS_AUD are unset AND the host is local dev. Set DEV_AGENT_EMAIL to
+  // one of the allowlisted addresses (shell env or .dev.vars). Do not set
+  // DEV_AGENT_EMAIL in this file — it would ship to production.
 }

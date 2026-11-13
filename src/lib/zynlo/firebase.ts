@@ -2,6 +2,8 @@
  * Shared Zynlo workspace on Firebase Realtime Database.
  * Sole persistence for CRM data - no local / PGlite / Neon / disk snapshots.
  */
+import { ClientSafeError } from "./client-error";
+import { assertRecordId } from "./ids";
 import type {
   Agent,
   Call,
@@ -55,14 +57,14 @@ function invalidateCache(col?: Collection) {
 }
 
 function uid() {
-  return Date.now().toString(36) + Math.random().toString(36).slice(2, 10);
+  return crypto.randomUUID();
 }
 
 async function authedHeaders(
   base: Record<string, string>,
 ): Promise<Record<string, string>> {
   if (typeof window !== "undefined") {
-    throw new Error("The workspace can only be reached from the server");
+    throw new ClientSafeError("Something went wrong. Try again.");
   }
   const { getFirebaseAccessToken } = await import("./firebase-token.server");
   const token = await getFirebaseAccessToken();
@@ -84,10 +86,10 @@ async function rtdbFetch<T>(
     cache: "no-store",
   });
   if (!res.ok) {
-    const text = await res.text().catch(() => "");
-    throw new Error(
-      `Firebase ${init?.method || "GET"} ${path} failed (${res.status}): ${text || res.statusText}`,
+    console.error(
+      `[zynlo] firebase ${init?.method || "GET"} failed (${res.status})`,
     );
+    throw new ClientSafeError("Something went wrong. Try again.");
   }
   if ((init?.method || "GET").toUpperCase() === "DELETE") return null as T;
   const text = await res.text();
@@ -152,10 +154,8 @@ async function rtdbGetCollection(col: Collection): Promise<unknown> {
   const res = await fetch(url, { headers, cache: "no-store" });
   if (res.status === 304 && prev) return prev.data;
   if (!res.ok) {
-    const text = await res.text().catch(() => "");
-    throw new Error(
-      `Firebase GET ${path} failed (${res.status}): ${text || res.statusText}`,
-    );
+    console.error(`[zynlo] firebase GET failed (${res.status})`);
+    throw new ClientSafeError("Something went wrong. Try again.");
   }
   const etag = res.headers.get("ETag") || res.headers.get("etag") || "";
   const text = await res.text();
@@ -372,12 +372,6 @@ export async function firebaseLoadAll(retries = 0): Promise<ZynloData> {
   return data;
 }
 
-function assertRecordId(id: string) {
-  if (!id || id.length < 6 || id.includes("/") || id.includes(".")) {
-    throw new Error("Invalid record id");
-  }
-}
-
 async function putItem(
   collection: Collection,
   id: string,
@@ -392,7 +386,7 @@ async function putItem(
     body: JSON.stringify(payload),
   });
   if (!saved || typeof saved !== "object") {
-    throw new Error(`Save did not persist to ${collection}`);
+    throw new ClientSafeError("Save did not persist.");
   }
 }
 
@@ -413,10 +407,9 @@ export async function firebaseUpsertAgent(input: {
   email?: string;
   role?: string;
   status?: string;
-  passwordHash?: string;
 }): Promise<Agent> {
   const name = input.name.trim();
-  if (!name) throw new Error("Name is required");
+  if (!name) throw new ClientSafeError("Name is required");
   const id = input.id || uid();
   let prev: Record<string, unknown> | null = null;
   if (input.id) {
@@ -424,19 +417,61 @@ export async function firebaseUpsertAgent(input: {
       `/agents/${encodeURIComponent(id)}.json`,
     );
   }
+  // Keep any existing password hash byte-for-byte. Access is the login.
   const passwordHash =
-    input.passwordHash ||
-    (prev && typeof prev.passwordHash === "string" ? prev.passwordHash : "");
-  if (!passwordHash) throw new Error("Password is required");
+    prev && typeof prev.passwordHash === "string" && prev.passwordHash
+      ? prev.passwordHash
+      : undefined;
   const row = {
     id,
     name,
     email: (input.email || "").trim(),
     role: input.role || "Agent",
     status: input.status || "Active",
-    passwordHash,
+    ...(passwordHash ? { passwordHash } : {}),
   };
   await putItem("agents", id, row);
+  return mapAgent(row);
+}
+
+/** Adds only the email field. Other agent fields, including passwordHash, stay put. */
+export async function firebaseSetAgentEmail(
+  id: string,
+  email: string,
+): Promise<void> {
+  assertRecordId(id);
+  invalidateCache("agents");
+  await rtdbFetch(`/agents/${encodeURIComponent(id)}.json`, {
+    method: "PATCH",
+    body: JSON.stringify({ email }),
+  });
+}
+
+/** Inserts a new Access agent. Refuses to overwrite a row that is already there. */
+export async function firebaseCreateAccessAgent(input: {
+  id: string;
+  name: string;
+  email: string;
+}): Promise<Agent> {
+  assertRecordId(input.id);
+  const existing = await rtdbFetch<Record<string, unknown> | null>(
+    `/agents/${encodeURIComponent(input.id)}.json`,
+  );
+  if (existing && typeof existing === "object") {
+    const current = mapAgent(existing);
+    if (current.email.trim().toLowerCase() === input.email.trim().toLowerCase()) {
+      return current;
+    }
+    throw new ClientSafeError("Something went wrong. Try again.");
+  }
+  const row = {
+    id: input.id,
+    name: input.name,
+    email: input.email,
+    role: "Agent",
+    status: "Active" as const,
+  };
+  await putItem("agents", input.id, row);
   return mapAgent(row);
 }
 
@@ -455,7 +490,7 @@ export async function firebaseUpsertCustomer(input: {
 }): Promise<Customer> {
   const name = input.name.trim();
   const phone = input.phone.trim();
-  if (!name || !phone) throw new Error("Name and phone are required");
+  if (!name || !phone) throw new ClientSafeError("Name and phone are required");
   const id = input.id || uid();
   const row = {
     id,
@@ -487,7 +522,7 @@ export async function firebaseUpsertClient(input: {
   notes?: string;
 }): Promise<Client> {
   const name = input.name.trim();
-  if (!name) throw new Error("Company name is required");
+  if (!name) throw new ClientSafeError("Company name is required");
   const id = input.id || uid();
   const row = {
     id,
@@ -526,7 +561,7 @@ export async function firebaseUpsertCall(input: {
   csvCounted?: boolean;
 }): Promise<Call> {
   if (!input.datetime || !input.customerId) {
-    throw new Error("Datetime and customer are required");
+    throw new ClientSafeError("Datetime and customer are required");
   }
   const id = input.id || uid();
   let prev: Record<string, unknown> | null = null;
@@ -634,10 +669,10 @@ export async function firebaseUpsertMessage(input: {
   followUpAt?: string | null;
 }): Promise<Message> {
   if (!input.datetime || !input.customerId) {
-    throw new Error("Datetime and customer are required");
+    throw new ClientSafeError("Datetime and customer are required");
   }
   const body = (input.body || "").trim();
-  if (!body) throw new Error("Message body is required");
+  if (!body) throw new ClientSafeError("Message body is required");
   const id = input.id || uid();
   const row = {
     id,
@@ -666,12 +701,12 @@ export async function firebaseMergeCustomers(
   dropId: string,
 ): Promise<void> {
   if (!keepId || !dropId || keepId === dropId) {
-    throw new Error("Pick two different customers to merge");
+    throw new ClientSafeError("Pick two different customers to merge");
   }
   const data = await firebaseLoadAll();
   const keep = data.customers.find((c) => c.id === keepId);
   const drop = data.customers.find((c) => c.id === dropId);
-  if (!keep || !drop) throw new Error("Customer not found");
+  if (!keep || !drop) throw new ClientSafeError("Customer not found");
   for (const call of data.calls.filter((c) => c.customerId === dropId)) {
     await firebaseUpsertCall({
       id: call.id,

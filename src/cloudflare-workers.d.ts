@@ -2,5 +2,10 @@
 declare module "cloudflare:workers" {
   export const env: {
     FIREBASE_SERVICE_ACCOUNT_JSON?: string;
+    ACCESS_TEAM_DOMAIN?: string;
+    ACCESS_AUD?: string;
+    /** Local dev only, and only when the Access vars are unset. */
+    DEV_AGENT_EMAIL?: string;
+    ASSETS?: { fetch(request: Request): Promise<Response> };
   };
 }
