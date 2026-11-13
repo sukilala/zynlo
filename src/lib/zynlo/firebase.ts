@@ -434,16 +434,20 @@ export async function firebaseUpsertAgent(input: {
   return mapAgent(row);
 }
 
-/** Adds only the email field. Other agent fields, including passwordHash, stay put. */
-export async function firebaseSetAgentEmail(
+/** Patches email and/or role. Password hashes and other fields stay put. */
+export async function firebasePatchAgent(
   id: string,
-  email: string,
+  patch: { email?: string; role?: string },
 ): Promise<void> {
   assertRecordId(id);
+  const body: Record<string, string> = {};
+  if (patch.email) body.email = patch.email;
+  if (patch.role) body.role = patch.role;
+  if (Object.keys(body).length === 0) return;
   invalidateCache("agents");
   await rtdbFetch(`/agents/${encodeURIComponent(id)}.json`, {
     method: "PATCH",
-    body: JSON.stringify({ email }),
+    body: JSON.stringify(body),
   });
 }
 
@@ -452,6 +456,7 @@ export async function firebaseCreateAccessAgent(input: {
   id: string;
   name: string;
   email: string;
+  role?: string;
 }): Promise<Agent> {
   assertRecordId(input.id);
   const existing = await rtdbFetch<Record<string, unknown> | null>(
@@ -468,7 +473,7 @@ export async function firebaseCreateAccessAgent(input: {
     id: input.id,
     name: input.name,
     email: input.email,
-    role: "Agent",
+    role: input.role || "Agent",
     status: "Active" as const,
   };
   await putItem("agents", input.id, row);

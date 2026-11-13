@@ -21,7 +21,8 @@
   },
   "vars": {
     "ACCESS_TEAM_DOMAIN": "zynlo.cloudflareaccess.com",
-    "ACCESS_AUD": "bef128d05837d7d49acd8bb11f65e07633813d13dd6d5239d9773b23a743788c"
+    "ACCESS_AUD": "bef128d05837d7d49acd8bb11f65e07633813d13dd6d5239d9773b23a743788c",
+    "ADMIN_EMAILS": "susika.vs@gmail.com,edirisinghayashodha@gmail.com"
   }
   // Secret (not a var — never commit it):
   //   npx wrangler secret put FIREBASE_SERVICE_ACCOUNT_JSON
