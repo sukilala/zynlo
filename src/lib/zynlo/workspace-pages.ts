@@ -1,6 +1,7 @@
 /**
- * Browser-side assembly. The Worker returns one page at a time; search,
- * filters, and counts run here after every page of a collection is in memory.
+ * Browser-side assembly. Agents, customers, clients, calls, and messages load
+ * at the same time. Pages inside one collection follow the cursor. Search,
+ * filters, and counts run after every page of every collection is in memory.
  */
 import type { Agent, Call, Client, Customer, Message, ZynloData } from "./types.ts";
 import {

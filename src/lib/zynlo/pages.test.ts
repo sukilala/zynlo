@@ -5,6 +5,7 @@ import { countsInCallLog } from "./utils.ts";
 import {
   mapCall,
   orderedRows,
+  pageCountFor,
   pageFromRaw,
   RTDB_PAGE_SIZE,
   rtdbPageQuery,
@@ -255,6 +256,55 @@ test("paged loads append, dedupe the cursor row, then search and counts see ever
   assert.equal(data.calls.filter(countsInCallLog).length, 2);
   assert.equal(data.calls[0]?.id, "call02");
   assert.equal(data.calls.find((call) => call.id === "call01")?.clientId, "client1");
+});
+
+test("the five collections start together, then each one walks its own pages", async () => {
+  let active = 0;
+  let maxActive = 0;
+  const firstWave: string[] = [];
+  await loadPagedWorkspace(async (collection, cursor) => {
+    active += 1;
+    maxActive = Math.max(maxActive, active);
+    if (!cursor) firstWave.push(collection);
+    await new Promise((resolve) => setTimeout(resolve, 20));
+    active -= 1;
+    if (collection === "customers" && !cursor) {
+      return { collection, items: [person("cust01", "Ama")], nextCursor: "cust01" };
+    }
+    if (collection === "agents") {
+      return {
+        collection,
+        items: [
+          {
+            id: "agent01",
+            name: "Susika",
+            email: "susika.vs@gmail.com",
+            role: "Admin",
+            status: "Active",
+          },
+        ],
+        nextCursor: null,
+      };
+    }
+    if (collection === "calls") {
+      return { collection, items: [], legacyClients: [], nextCursor: null };
+    }
+    return { collection, items: [], nextCursor: null };
+  });
+  assert.equal(maxActive, 5);
+  assert.equal(new Set(firstWave).size, 5);
+});
+
+test("3365 records is 7 pages, and a full load of two large collections is 18 requests", () => {
+  assert.equal(RTDB_PAGE_SIZE, 500);
+  assert.equal(pageCountFor(3365), 7);
+  assert.equal(pageCountFor(0), 1);
+  const customers = pageCountFor(3365);
+  const calls = pageCountFor(3365);
+  const agents = pageCountFor(4);
+  const clients = pageCountFor(20);
+  const messages = pageCountFor(40);
+  assert.equal(customers + calls + agents + clients + messages + 1, 18);
 });
 
 test("merge batches stay small and only the last batch removes the duplicate", () => {

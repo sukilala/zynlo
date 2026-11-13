@@ -14,14 +14,23 @@ import {
 } from "./types.ts";
 import { weightedQa } from "./utils.ts";
 
-/** Records per Worker request. Small enough that parse + map stays cheap. */
-export const RTDB_PAGE_SIZE = 64;
+/**
+ * Records per Worker request. A 500-record page of this shape is about 1–2 ms
+ * of parse and map, under the free-plan CPU budget. 3,365 records is 7 pages.
+ */
+export const RTDB_PAGE_SIZE = 500;
 
 /** Ids moved in one merge request (one small read + one small patch each). */
 export const MERGE_BATCH = 20;
 
-/** Stops a cursor bug from paging forever. 400 * 64 covers well past today's data. */
+/** Stops a cursor bug from paging forever. */
 export const MAX_COLLECTION_PAGES = 400;
+
+/** Pages needed for a collection, including the request that discovers it is empty. */
+export function pageCountFor(records: number): number {
+  if (records <= 0) return 1;
+  return Math.ceil(records / RTDB_PAGE_SIZE);
+}
 
 export const COLLECTIONS = ["agents", "customers", "clients", "calls", "messages"] as const;
 

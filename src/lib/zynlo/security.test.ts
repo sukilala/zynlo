@@ -1,11 +1,6 @@
 import assert from "node:assert/strict";
 import { test } from "node:test";
-import {
-  createLocalJWKSet,
-  exportJWK,
-  generateKeyPair,
-  SignJWT,
-} from "jose";
+import { createLocalJWKSet, exportJWK, generateKeyPair, SignJWT } from "jose";
 import {
   accessAgentId,
   isAdminEmail,
@@ -50,13 +45,16 @@ test("blank email is filled only when the name matches the local-part exactly", 
     kind: "backfill",
     id: "a1",
   });
-  assert.equal(planAgentLink(
-    [
-      { id: "a1", name: "Susika Vs", email: "" },
-      { id: "a2", name: "susika vs", email: "" },
-    ],
-    "susika.vs@gmail.com",
-  ).kind, "create");
+  assert.equal(
+    planAgentLink(
+      [
+        { id: "a1", name: "Susika Vs", email: "" },
+        { id: "a2", name: "susika vs", email: "" },
+      ],
+      "susika.vs@gmail.com",
+    ).kind,
+    "create",
+  );
 });
 
 test("duplicate emails keep the lowest id and do not create another agent", () => {
@@ -71,9 +69,7 @@ test("duplicate emails keep the lowest id and do not create another agent", () =
 });
 
 test("admin emails are the two named addresses, case-insensitive", () => {
-  const admins = parseAdminEmails(
-    " Susika.VS@gmail.com, edirisinghayashodha@gmail.com ",
-  );
+  const admins = parseAdminEmails(" Susika.VS@gmail.com, edirisinghayashodha@gmail.com ");
   assert.equal(admins.size, 2);
   assert.equal(isAdminEmail("susika.vs@gmail.com", admins), true);
   assert.equal(isAdminEmail("EDIRISINGHAYASHODHA@gmail.com", admins), true);
@@ -176,10 +172,38 @@ test("jwt email is taken from the header or CF_Authorization cookie", async () =
     .setAudience(AUD)
     .setExpirationTime("10m")
     .sign(privateKey);
-  await assert.rejects(
-    emailFromAccessJwt(stranger, config, jwks),
-    /not on the Zynlo roster/,
-  );
+  await assert.rejects(emailFromAccessJwt(stranger, config, jwks), /not on the Zynlo roster/);
+});
+
+test("a repeated access jwt is verified once per isolate", async () => {
+  const { publicKey, privateKey } = await generateKeyPair("RS256", {
+    extractable: true,
+  });
+  const jwks = createLocalJWKSet({ keys: [await exportJWK(publicKey)] });
+  const config = {
+    issuer: ISSUER,
+    audience: AUD,
+    certsUrl: `${ISSUER}/cdn-cgi/access/certs`,
+  };
+  const token = await new SignJWT({ email: "susika.vs@gmail.com" })
+    .setProtectedHeader({ alg: "RS256" })
+    .setIssuer(ISSUER)
+    .setAudience(AUD)
+    .setExpirationTime("10m")
+    .sign(privateKey);
+  let lookups = 0;
+  const getKey: Parameters<typeof emailFromAccessJwt>[2] = async (header, raw) => {
+    lookups += 1;
+    return jwks(header, raw);
+  };
+  const first = emailFromAccessJwt(token, config, getKey);
+  const second = emailFromAccessJwt(token, config, getKey);
+  assert.equal(await first, "susika.vs@gmail.com");
+  assert.equal(await second, "susika.vs@gmail.com");
+  const duringFirstWave = lookups;
+  assert.equal(await emailFromAccessJwt(token, config, getKey), "susika.vs@gmail.com");
+  assert.equal(lookups, duringFirstWave);
+  assert.equal(duringFirstWave, 1);
 });
 
 test("static assets under /CRM are recognized without treating the app shell as a file", () => {

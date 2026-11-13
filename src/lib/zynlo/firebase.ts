@@ -23,8 +23,11 @@ import type { Agent, Call, Client, Customer, Message, QaParts } from "./types";
 
 const RTDB_ROOT = "https://zynlo-crm-default-rtdb.firebaseio.com";
 
-/** Uncompressed page body. Larger than this is cancelled before JSON.parse. */
-const MAX_PAGE_BYTES = 256 * 1024;
+/**
+ * Uncompressed page body. A 500-record page with ordinary notes fits.
+ * Anything larger is cancelled before JSON.parse.
+ */
+const MAX_PAGE_BYTES = 2 * 1024 * 1024;
 
 const AGENT_TTL_MS = 60_000;
 
