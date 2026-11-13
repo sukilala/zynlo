@@ -24,9 +24,27 @@ const TEMPLATE_ROOT = join(dirname(fileURLToPath(import.meta.url)), "..");
 test("injects before </head>", () => {
   const out = injectGrokPwaHead("<html><head><title>x</title></head><body></body></html>");
   assert.match(out, /rel="manifest"/);
+  assert.match(out, /href="\/__grok\/manifest\.webmanifest"/);
   assert.match(out, /apple-touch-icon/);
   assert.match(out, /grok-app-builder\/extensions\.js/);
   assert.ok(out.indexOf("manifest") < out.indexOf("</head>"));
+});
+
+test("injects manifest links under the app base", () => {
+  const out = injectGrokPwaHead("<html><head></head></html>", { basePath: "/CRM/" });
+  assert.match(out, /href="\/CRM\/__grok\/manifest\.webmanifest"/);
+  assert.match(out, /href="\/CRM\/__grok\/icon-180\.png"/);
+  assert.doesNotMatch(out, /href="\/__grok\/manifest\.webmanifest"/);
+  assert.doesNotMatch(out, /href="\/__grok\/icon-180\.png"/);
+});
+
+test("a /CRM manifest link counts as present", () => {
+  const html =
+    '<html><head><link rel="manifest" href="/CRM/__grok/manifest.webmanifest"><link rel="apple-touch-icon" href="/CRM/__grok/icon-180.png"></head></html>';
+  const out = injectGrokPwaHead(html, { basePath: "/CRM/" });
+  assert.equal(out.split("manifest.webmanifest").length - 1, 1);
+  assert.equal(out.split("__grok/icon-180.png").length - 1, 1);
+  assert.doesNotMatch(out, /href="\/__grok\/manifest\.webmanifest"/);
 });
 
 test("injects the extensions script without a project id", () => {
