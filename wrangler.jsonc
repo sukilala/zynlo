@@ -1,0 +1,21 @@
+{
+  "$schema": "node_modules/wrangler/config-schema.json",
+  "name": "zynlo-crm",
+  "main": "@tanstack/react-start/server-entry",
+  // 2026-08-04+ enables nodejs_compat by default; the flag is set explicitly
+  // so WebCrypto/jose and process.env keep working if the date is rolled back.
+  "compatibility_date": "2026-11-13",
+  "compatibility_flags": ["nodejs_compat"],
+  "observability": {
+    "enabled": true
+  },
+  // Static assets are uploaded from the Vite client build. base_path mounts
+  // that directory at /CRM so a zone route of zynlo.lk/CRM* can reach them.
+  // Do not add routes here — the zynlo.lk/CRM* route is attached separately.
+  "assets": {
+    "base_path": "/CRM"
+  }
+  // Secret (not a var — never commit it):
+  //   npx wrangler secret put FIREBASE_SERVICE_ACCOUNT_JSON
+  // Value is the full Firebase service-account JSON string.
+}

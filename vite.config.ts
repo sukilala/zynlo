@@ -1,11 +1,12 @@
 import { readdirSync } from "node:fs";
 import { join } from "node:path";
+import { fileURLToPath } from "node:url";
 import type { Plugin } from "vite";
 import { defineConfig } from "vite";
 import { tanstackStart } from "@tanstack/react-start/plugin/vite";
 import viteReact from "@vitejs/plugin-react";
 import tailwindcss from "@tailwindcss/vite";
-import { nitro } from "nitro/vite";
+import { cloudflare } from "@cloudflare/vite-plugin";
 // @ts-expect-error JS plugin alongside the TS vite config
 import { grokPwaPlugin } from "./scripts/grok-pwa-plugin.mjs";
 // @ts-expect-error JS plugin alongside the TS vite config
@@ -142,10 +143,39 @@ function authPopupPlugin(): Plugin {
   };
 }
 
+/**
+ * Preview and local `vite dev` are opened at `/`. The CRM itself is mounted
+ * at `/CRM`, so send the bare root (and `/CRM` without a slash) to `/CRM/`.
+ */
+function crmBaseRedirectPlugin(): Plugin {
+  return {
+    name: "zynlo:crm-base-redirect",
+    apply: "serve",
+    enforce: "pre",
+    configureServer(server) {
+      server.middlewares.use((req, res, next) => {
+        const raw = req.url ?? "/";
+        const pathOnly = raw.split("?", 1)[0] ?? "/";
+        if (pathOnly !== "/" && pathOnly !== "/CRM") {
+          next();
+          return;
+        }
+        const search = raw.includes("?") ? `?${raw.slice(raw.indexOf("?") + 1)}` : "";
+        res.statusCode = 308;
+        res.setHeader("Location", `/CRM/${search}`);
+        res.end();
+      });
+    },
+  };
+}
+
 // `0.0.0.0:8080` is the live-preview contract — don't change host/port.
 // The dev server starts once `src/router.tsx` and `src/routes/` exist — see
 // AGENTS.md § "First scaffold".
+// Production builds target Cloudflare Workers (`wrangler.jsonc`). The plugin
+// stays off during `vite dev` so the preview keeps the Node dev server.
 export default defineConfig(({ command, isPreview }) => ({
+  base: "/CRM/",
   server: {
     host: "0.0.0.0",
     port: 8080,
@@ -156,28 +186,41 @@ export default defineConfig(({ command, isPreview }) => ({
     port: 8081,
     strictPort: true,
   },
-  resolve: { tsconfigPaths: true },
+  resolve: {
+    tsconfigPaths: true,
+    // `cloudflare:workers` exists only in workerd. Alias it during `vite dev`
+    // so the dependency scan can resolve the credential fallback import.
+    ...(command === "serve" && !isPreview
+      ? {
+          alias: {
+            "cloudflare:workers": fileURLToPath(
+              new URL("./src/lib/zynlo/cloudflare-workers.dev.ts", import.meta.url),
+            ),
+          },
+        }
+      : {}),
+  },
   plugins: [
+    // First, and only for the Worker build. Left off in dev so Nitro/workerd
+    // does not open a second port beside the 8080 preview.
+    ...(command === "build" || isPreview
+      ? [cloudflare({ viteEnvironment: { name: "ssr" } })]
+      : []),
+    crmBaseRedirectPlugin(),
     pgliteBootstrapPlugin(),
     // Before tanstackStart so /auth/popup never falls through to the SPA.
     authPopupPlugin(),
     // Dev-only /__app-env, read by scripts/check-auth-invariant.mjs.
     appEnvPlugin(),
-    // PWA head + ?install=1 tutorial page; runs before Start/Nitro.
+    // PWA head + ?install=1 tutorial page (dev/preview). The Worker deploy
+    // does not run the Nitro middleware in server/.
     grokPwaPlugin(),
     tailwindcss(),
-    tanstackStart(),
-    ...(command === "build" || isPreview
-      ? [
-          nitro({
-            preset: "vercel",
-            // Auto-registers server/middleware/* (the PWA install page +
-            // manifest + head-tag middleware). Nitro v3 defaults serverDir to
-            // false, so removing this silently unwires /?install=1 on deploys.
-            serverDir: "./server",
-          }),
-        ]
-      : []),
+    tanstackStart({
+      router: {
+        basepath: "/CRM",
+      },
+    }),
     viteReact(),
   ],
 }));

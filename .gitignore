@@ -10,3 +10,8 @@ attachments/*firebase-adminsdk*
 
 .vercel/
 artifacts/
+
+.wrangler/
+.dev.vars
+.dev.vars.*
+dist/

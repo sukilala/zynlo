@@ -23,6 +23,7 @@ import {
 import type { Agent, Call, Client, Customer, Message, ZynloData } from "./types";
 
 const COOKIE = "zynlo_gate";
+const COOKIE_PATH = "/CRM";
 const MAX_AGE = 60 * 60 * 24 * 180;
 
 function hideAgent(agent: Agent): Agent {
@@ -38,25 +39,25 @@ function hideSecrets(data: ZynloData): ZynloData {
 async function seal(agentId: string) {
   const { sealAgentSession } = await import("./firebase-token.server");
   const exp = Date.now() + MAX_AGE * 1000;
-  setCookie(COOKIE, sealAgentSession(agentId, exp), {
+  setCookie(COOKIE, await sealAgentSession(agentId, exp), {
     httpOnly: true,
     secure: getRequestProtocol() === "https",
     sameSite: "lax",
-    path: "/",
+    path: COOKIE_PATH,
     maxAge: MAX_AGE,
   });
 }
 
 async function requireAgent() {
   const { openAgentSession } = await import("./firebase-token.server");
-  const agentId = openAgentSession(getCookie(COOKIE));
+  const agentId = await openAgentSession(getCookie(COOKIE));
   if (!agentId) throw new Error("Sign in required");
   return agentId;
 }
 
 export const whoAmI = createServerFn({ method: "GET" }).handler(async () => {
   const { openAgentSession } = await import("./firebase-token.server");
-  return { agentId: openAgentSession(getCookie(COOKIE)) };
+  return { agentId: await openAgentSession(getCookie(COOKIE)) };
 });
 
 export const listAgentNames = createServerFn({ method: "GET" }).handler(
@@ -103,7 +104,7 @@ export const resumeSession = createServerFn({ method: "POST" })
 
 export const signOutAgent = createServerFn({ method: "POST" }).handler(
   async () => {
-    deleteCookie(COOKIE, { path: "/" });
+    deleteCookie(COOKIE, { path: COOKIE_PATH });
     return { ok: true };
   },
 );

@@ -8,6 +8,7 @@ import {
 import { AuthProvider } from "@/lib/auth/provider";
 import { PreviewHostBridge } from "@/components/preview-host-bridge";
 import appCss from "../styles.css?url";
+import { publicAsset } from "@/lib/zynlo/public-asset";
 
 export const Route = createRootRoute({
   head: () => ({
@@ -26,9 +27,9 @@ export const Route = createRootRoute({
       { name: "theme-color", content: "#0f0818" },
     ],
     links: [
-      { rel: "icon", type: "image/png", href: "/favicon-32.png" },
-      { rel: "apple-touch-icon", href: "/apple-touch-icon.png" },
-      { rel: "manifest", href: "/__grok/manifest.webmanifest" },
+      { rel: "icon", type: "image/png", href: publicAsset("favicon-32.png") },
+      { rel: "apple-touch-icon", href: publicAsset("apple-touch-icon.png") },
+      { rel: "manifest", href: publicAsset("__grok/manifest.webmanifest") },
       {
         rel: "stylesheet",
         href: "https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700;800&display=swap",

@@ -1,6 +1,7 @@
 import { jsPDF } from "jspdf";
 import autoTable from "jspdf-autotable";
 import type { Agent, Call, Client, Customer, Message } from "./types";
+import { publicAsset } from "./public-asset";
 import {
   countsAsInbound,
   countsAsOutbound,
@@ -28,7 +29,7 @@ let logoCache: string | null = null;
 async function loadLogo(): Promise<string | null> {
   if (logoCache) return logoCache;
   try {
-    const res = await fetch("/logo-wordmark.png", { cache: "force-cache" });
+    const res = await fetch(publicAsset("logo-wordmark.png"), { cache: "force-cache" });
     if (!res.ok) return null;
     const blob = await res.blob();
     logoCache = await new Promise((resolve, reject) => {

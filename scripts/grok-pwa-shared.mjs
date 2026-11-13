@@ -157,21 +157,30 @@ export function renderInstallPageHtml(template, { host, url } = {}) {
     .replaceAll("{{APP_URL}}", escapeHtml(stripInstallParams(url)));
 }
 
-export function renderWebManifest(hostHeader) {
+/** `/` or `/CRM/` — a trailing slash, always root-relative. */
+function normalizeAppBase(basePath = "/") {
+  const trimmed = String(basePath || "/").trim() || "/";
+  const withSlash = trimmed.endsWith("/") ? trimmed : `${trimmed}/`;
+  return withSlash.startsWith("/") ? withSlash : `/${withSlash}`;
+}
+
+export function renderWebManifest(hostHeader, basePath = "/") {
+  const base = normalizeAppBase(basePath);
+  const prefix = base === "/" ? "" : base.slice(0, -1);
   const name = appNameFromHost(hostHeader);
   return JSON.stringify(
     {
       name,
       short_name: name,
-      id: "/",
-      start_url: "/",
-      scope: "/",
+      id: base,
+      start_url: base,
+      scope: base,
       display: "standalone",
       background_color: "#000000",
       theme_color: "#000000",
       icons: [
         {
-          src: "/__grok/icon-180.png",
+          src: `${prefix}/__grok/icon-180.png`,
           sizes: "180x180",
           type: "image/png",
         },
@@ -182,12 +191,14 @@ export function renderWebManifest(hostHeader) {
   );
 }
 
-export function grokPwaHeadTags(appName = DEFAULT_APP_NAME) {
+export function grokPwaHeadTags(appName = DEFAULT_APP_NAME, basePath = "/") {
+  const base = normalizeAppBase(basePath);
+  const prefix = base === "/" ? "" : base.slice(0, -1);
   return [
     // Standalone display comes from the manifest ("display": "standalone");
     // the legacy *-web-app-capable metas it replaces are deliberately absent.
-    ["manifest", '<link rel="manifest" href="/__grok/manifest.webmanifest">'],
-    ["apple-touch-icon", '<link rel="apple-touch-icon" href="/__grok/icon-180.png">'],
+    ["manifest", `<link rel="manifest" href="${prefix}/__grok/manifest.webmanifest">`],
+    ["apple-touch-icon", `<link rel="apple-touch-icon" href="${prefix}/__grok/icon-180.png">`],
     [
       "apple-mobile-web-app-title",
       `<meta name="apple-mobile-web-app-title" content="${escapeHtml(appName)}">`,
@@ -432,12 +443,13 @@ export function normalizeHeadContext(ctx = {}) {
     host: ctx.host ?? "",
     cwd,
     site,
+    basePath: normalizeAppBase(ctx.basePath),
   };
 }
 
 export function injectGrokPwaHead(html, ctx = {}) {
   if (typeof html !== "string") return html;
-  const { site, projectId, creator, creatorId, host, cwd } = normalizeHeadContext(ctx);
+  const { site, projectId, creator, creatorId, host, cwd, basePath } = normalizeHeadContext(ctx);
   const documentTitle = titleFromDocument(html);
   const appName = resolveOgTitle(
     site,
@@ -448,10 +460,11 @@ export function injectGrokPwaHead(html, ctx = {}) {
   let next = stripShareMetaTags(html);
   if (!readGrokExtensionsEnabled()) next = stripGrokExtensionsScript(next);
 
-  const missing = grokPwaHeadTags(appName)
+  const missing = grokPwaHeadTags(appName, basePath)
     .filter(([key]) => {
-      if (key === "manifest") return !next.includes('href="/__grok/manifest.webmanifest"');
-      if (key === "apple-touch-icon") return !next.includes('href="/__grok/icon-180.png"');
+      // Any manifest or grok touch icon counts, including ones already under /CRM.
+      if (key === "manifest") return !next.includes("manifest.webmanifest");
+      if (key === "apple-touch-icon") return !next.includes("__grok/icon-180.png");
       return !next.includes(`name="${key}"`);
     })
     .map(([, tag]) => tag);
@@ -512,6 +525,7 @@ export function createHeadInjector(ctx = {}) {
       host: normalized.host,
       cwd: normalized.cwd,
       site: normalized.site,
+      basePath: normalized.basePath,
     });
 
   return {

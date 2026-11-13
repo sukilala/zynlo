@@ -24,9 +24,27 @@ const TEMPLATE_ROOT = join(dirname(fileURLToPath(import.meta.url)), "..");
 test("injects before </head>", () => {
   const out = injectGrokPwaHead("<html><head><title>x</title></head><body></body></html>");
   assert.match(out, /rel="manifest"/);
+  assert.match(out, /href="\/__grok\/manifest\.webmanifest"/);
   assert.match(out, /apple-touch-icon/);
   assert.match(out, /grok-app-builder\/extensions\.js/);
   assert.ok(out.indexOf("manifest") < out.indexOf("</head>"));
+});
+
+test("injects manifest links under the app base", () => {
+  const out = injectGrokPwaHead("<html><head></head></html>", { basePath: "/CRM/" });
+  assert.match(out, /href="\/CRM\/__grok\/manifest\.webmanifest"/);
+  assert.match(out, /href="\/CRM\/__grok\/icon-180\.png"/);
+  assert.doesNotMatch(out, /href="\/__grok\/manifest\.webmanifest"/);
+  assert.doesNotMatch(out, /href="\/__grok\/icon-180\.png"/);
+});
+
+test("a /CRM manifest link counts as present", () => {
+  const html =
+    '<html><head><link rel="manifest" href="/CRM/__grok/manifest.webmanifest"><link rel="apple-touch-icon" href="/CRM/__grok/icon-180.png"></head></html>';
+  const out = injectGrokPwaHead(html, { basePath: "/CRM/" });
+  assert.equal(out.split("manifest.webmanifest").length - 1, 1);
+  assert.equal(out.split("__grok/icon-180.png").length - 1, 1);
+  assert.doesNotMatch(out, /href="\/__grok\/manifest\.webmanifest"/);
 });
 
 test("injects the extensions script without a project id", () => {
@@ -477,16 +495,32 @@ test("renders the manifest with the per-app name", () => {
   const manifest = JSON.parse(renderWebManifest("wild-race.grok.me"));
   assert.equal(manifest.name, "Wild Race");
   assert.equal(manifest.short_name, "Wild Race");
+  assert.equal(manifest.start_url, "/");
+  assert.equal(manifest.scope, "/");
   assert.equal(manifest.icons[0].src, "/__grok/icon-180.png");
 });
 
-// Tripwires: the deployed-app path only works if Nitro scans server/ — an
-// accidental edit that drops serverDir or the middleware file would otherwise
-// fail silently (published apps would just render the app for ?install=1).
-test("vite config keeps the nitro serverDir wiring", () => {
+test("prefixes manifest paths when the app is mounted under /CRM", () => {
+  const manifest = JSON.parse(renderWebManifest("zynlo.lk", "/CRM/"));
+  assert.equal(manifest.start_url, "/CRM/");
+  assert.equal(manifest.scope, "/CRM/");
+  assert.equal(manifest.id, "/CRM/");
+  assert.equal(manifest.icons[0].src, "/CRM/__grok/icon-180.png");
+});
+
+// The published app is a Cloudflare Worker, not Nitro. Dev still runs the
+// PWA plugin; the Worker serves the static manifest under /CRM.
+test("vite config builds a Cloudflare worker and keeps the dev PWA plugin", () => {
   const viteConfig = readFileSync(join(TEMPLATE_ROOT, "vite.config.ts"), "utf8");
-  assert.match(viteConfig, /serverDir:\s*"\.\/server"/);
+  assert.match(viteConfig, /cloudflare\(/);
   assert.match(viteConfig, /grokPwaPlugin\(\)/);
+  assert.doesNotMatch(viteConfig, /preset:\s*"vercel"/);
+  const manifest = JSON.parse(
+    readFileSync(join(TEMPLATE_ROOT, "public/__grok/manifest.webmanifest"), "utf8"),
+  );
+  assert.equal(manifest.start_url, "/CRM/");
+  assert.equal(manifest.scope, "/CRM/");
+  assert.ok(String(manifest.icons[0].src).startsWith("/CRM/"));
 });
 
 test("nitro middleware and its bundled assets exist", () => {
