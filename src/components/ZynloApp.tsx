@@ -133,6 +133,7 @@ import {
   inputClass,
 } from "./ui-bits";
 import { cn } from "@/lib/cn";
+import { publicAsset } from "@/lib/zynlo/public-asset";
 
 const LAST_AGENT_KEY = "zynlo.lastAgentId";
 function readLastAgentId() {
@@ -1789,7 +1790,7 @@ export function ZynloApp({ initial }: { initial: ZynloData }) {
 					className: "w-full max-w-sm space-y-4 rounded-2xl border border-border bg-surface p-6 shadow-[0_12px_40px_rgba(45,27,78,0.18)]",
 					children: [
 						/* @__PURE__ */ jsx("img", {
-							src: "/logo-wordmark.png",
+							src: publicAsset("logo-wordmark.png"),
 							alt: "ZYNLO",
 							className: "mx-auto h-9 w-auto object-contain"
 						}),
@@ -1872,7 +1873,7 @@ export function ZynloApp({ initial }: { initial: ZynloData }) {
 					/* @__PURE__ */ jsx("div", {
 						className: "mb-8 flex items-center px-2 pt-1",
 						children: /* @__PURE__ */ jsx("img", {
-							src: "/logo-wordmark.png",
+							src: publicAsset("logo-wordmark.png"),
 							alt: "ZYNLO",
 							className: "h-8 w-auto max-w-[180px] object-contain object-left md:h-9"
 						})

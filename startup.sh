@@ -28,7 +28,7 @@ restore_crm() {
 
 restore_crm
 
-if curl -sf -o /dev/null --max-time 2 http://127.0.0.1:8080/; then
+if curl -sf -o /dev/null --max-time 2 http://127.0.0.1:8080/CRM/; then
   exit 0
 fi
 node scripts/preview.mjs stop >/dev/null 2>&1 || true

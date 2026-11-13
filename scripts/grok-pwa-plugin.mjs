@@ -42,10 +42,17 @@ function sendHtml(res, html) {
   res.end(body);
 }
 
+/** App is mounted at /CRM; accept both prefixed and root-relative chrome paths. */
+function appPath(pathname) {
+  if (pathname === "/CRM") return "/";
+  if (pathname.startsWith("/CRM/")) return pathname.slice("/CRM".length) || "/";
+  return pathname;
+}
+
 function serveGrokPwa(middlewares) {
   middlewares.use((req, res, next) => {
     const rawUrl = req.url ?? "";
-    const pathOnly = rawUrl.split("?", 1)[0] ?? "";
+    const pathOnly = appPath(rawUrl.split("?", 1)[0] ?? "");
     const method = (req.method ?? "GET").toUpperCase();
     if (method !== "GET") {
       next();
@@ -87,7 +94,7 @@ function serveGrokPwa(middlewares) {
 function wrapHtmlResponses(middlewares, cwd) {
   middlewares.use((req, res, next) => {
     const rawUrl = req.url ?? "";
-    const pathOnly = rawUrl.split("?", 1)[0] ?? "";
+    const pathOnly = appPath(rawUrl.split("?", 1)[0] ?? "");
     const method = (req.method ?? "GET").toUpperCase();
     const looksLikeDocument =
       method === "GET" &&

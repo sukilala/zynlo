@@ -5,6 +5,7 @@ import { routeTree } from "./routeTree.gen";
 export function getRouter() {
   return createRouter({
     routeTree,
+    basepath: "/CRM",
     defaultPreload: "intent",
     scrollRestoration: true,
     defaultErrorComponent: AppErrorComponent,
