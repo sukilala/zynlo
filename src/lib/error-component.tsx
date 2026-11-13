@@ -1,6 +1,19 @@
 import type { ErrorComponentProps } from "@tanstack/react-router";
 import { TriangleAlert } from "lucide-react";
 
+function visibleError(error: unknown): string {
+  const message = error instanceof Error ? error.message : "";
+  if (
+    message &&
+    message.length <= 160 &&
+    !/[\n\r]/.test(message) &&
+    !/firebase|secret|token|password|assertion|at\s+\S+\s+\(/i.test(message)
+  ) {
+    return message;
+  }
+  return "Something went wrong. Try reloading the page.";
+}
+
 export function AppErrorComponent({ error }: ErrorComponentProps) {
   return (
     <main
@@ -14,7 +27,7 @@ export function AppErrorComponent({ error }: ErrorComponentProps) {
       </span>
       <h1 className="text-lg font-semibold">Something went wrong</h1>
       <p className="max-w-md text-sm break-words text-zinc-500 dark:text-zinc-400">
-        {error instanceof Error ? error.message : "An unexpected error occurred. Try reloading the page."}
+        {visibleError(error)}
       </p>
     </main>
   );

@@ -6,8 +6,6 @@ type ServiceAccount = {
 };
 
 let accountPromise: Promise<ServiceAccount> | null = null;
-let macKeyPromise: Promise<CryptoKey> | null = null;
-let macKeyMaterial = "";
 
 function readProcessEnv(): string | undefined {
   const value =
@@ -80,44 +78,6 @@ async function loadServiceAccount(): Promise<ServiceAccount> {
   return accountPromise;
 }
 
-function base64Url(bytes: Uint8Array): string {
-  let bin = "";
-  for (const byte of bytes) bin += String.fromCharCode(byte);
-  return btoa(bin).replace(/\+/g, "-").replace(/\//g, "_").replace(/=+$/g, "");
-}
-
-/** HMAC-SHA256(SHA-256(privateKey), message), base64url. Matches the previous Node cookie seal. */
-async function hmacSha256(privateKey: string, message: string): Promise<string> {
-  if (!macKeyPromise || macKeyMaterial !== privateKey) {
-    macKeyMaterial = privateKey;
-    const digest = await crypto.subtle.digest(
-      "SHA-256",
-      new TextEncoder().encode(privateKey),
-    );
-    macKeyPromise = crypto.subtle.importKey(
-      "raw",
-      digest,
-      { name: "HMAC", hash: "SHA-256" },
-      false,
-      ["sign"],
-    );
-  }
-  const key = await macKeyPromise;
-  const sig = await crypto.subtle.sign(
-    "HMAC",
-    key,
-    new TextEncoder().encode(message),
-  );
-  return base64Url(new Uint8Array(sig));
-}
-
-function signaturesMatch(a: string, b: string): boolean {
-  if (a.length !== b.length) return false;
-  let diff = 0;
-  for (let i = 0; i < a.length; i += 1) diff |= a.charCodeAt(i) ^ b.charCodeAt(i);
-  return diff === 0;
-}
-
 let cache: { token: string; exp: number } | null = null;
 
 export async function getFirebaseAccessToken(): Promise<string> {
@@ -145,7 +105,8 @@ export async function getFirebaseAccessToken(): Promise<string> {
     }),
   });
   if (!res.ok) {
-    throw new Error(`Firebase auth failed (${res.status})`);
+    console.error(`[zynlo] firebase auth failed (${res.status})`);
+    throw new Error("workspace");
   }
   const json = (await res.json()) as { access_token: string; expires_in: number };
   cache = {
@@ -153,32 +114,4 @@ export async function getFirebaseAccessToken(): Promise<string> {
     exp: Date.now() + Math.max(60, json.expires_in) * 1000,
   };
   return json.access_token;
-}
-
-export async function sealAgentSession(agentId: string, exp: number): Promise<string> {
-  const { private_key: privateKey } = await loadServiceAccount();
-  const body = `${agentId}.${exp}`;
-  const sig = await hmacSha256(privateKey, body);
-  return `${body}.${sig}`;
-}
-
-export async function openAgentSession(
-  value: string | undefined | null,
-): Promise<string | null> {
-  if (!value) return null;
-  const parts = value.split(".");
-  if (parts.length < 3) return null;
-  const sig = parts.pop() as string;
-  const exp = Number(parts.pop());
-  const agentId = parts.join(".");
-  if (!agentId || !Number.isFinite(exp) || exp < Date.now()) return null;
-  let privateKey: string;
-  try {
-    privateKey = (await loadServiceAccount()).private_key;
-  } catch {
-    return null;
-  }
-  const expected = await hmacSha256(privateKey, `${agentId}.${exp}`);
-  if (!signaturesMatch(sig, expected)) return null;
-  return agentId;
 }

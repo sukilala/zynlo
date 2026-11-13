@@ -1,17 +1,10 @@
-import { createServerFn } from "@tanstack/react-start";
-import {
-  deleteCookie,
-  getCookie,
-  getRequestProtocol,
-  setCookie,
-} from "@tanstack/react-start/server";
+import { createMiddleware, createServerFn } from "@tanstack/react-start";
 import {
   firebaseDeleteAgent,
   firebaseDeleteCall,
   firebaseDeleteClient,
   firebaseDeleteCustomer,
   firebaseDeleteMessage,
-  firebaseListAgents,
   firebaseLoadAll,
   firebaseMergeCustomers,
   firebaseUpsertAgent,
@@ -20,11 +13,18 @@ import {
   firebaseUpsertCustomer,
   firebaseUpsertMessage,
 } from "./firebase";
+import { toClientError } from "./client-error";
 import type { Agent, Call, Client, Customer, Message, ZynloData } from "./types";
-
-const COOKIE = "zynlo_gate";
-const COOKIE_PATH = "/CRM";
-const MAX_AGE = 60 * 60 * 24 * 180;
+import {
+  idInput,
+  mergeInput,
+  parseInput,
+  saveAgentInput,
+  saveCallInput,
+  saveClientInput,
+  saveCustomerInput,
+  saveMessageInput,
+} from "./validate";
 
 function hideAgent(agent: Agent): Agent {
   const copy = { ...agent };
@@ -36,120 +36,51 @@ function hideSecrets(data: ZynloData): ZynloData {
   return { ...data, agents: data.agents.map(hideAgent) };
 }
 
-async function seal(agentId: string) {
-  const { sealAgentSession } = await import("./firebase-token.server");
-  const exp = Date.now() + MAX_AGE * 1000;
-  setCookie(COOKIE, await sealAgentSession(agentId, exp), {
-    httpOnly: true,
-    secure: getRequestProtocol() === "https",
-    sameSite: "lax",
-    path: COOKIE_PATH,
-    maxAge: MAX_AGE,
+const crmFn = createMiddleware({ type: "function" })
+  .client(async ({ next }) => {
+    return next({ headers: { "x-zynlo-request": "crm" } });
+  })
+  .server(async ({ next }) => {
+    const { assertAppRequest } = await import("./request-guard.server");
+    assertAppRequest();
+    try {
+      return await next();
+    } catch (err) {
+      throw toClientError(err);
+    }
   });
-}
 
 async function requireAgent() {
-  const { openAgentSession } = await import("./firebase-token.server");
-  const agentId = await openAgentSession(getCookie(COOKIE));
-  if (!agentId) throw new Error("Sign in required");
-  return agentId;
+  const { requireAccessAgent } = await import("./identity.server");
+  return requireAccessAgent();
 }
 
-export const whoAmI = createServerFn({ method: "GET" }).handler(async () => {
-  const { openAgentSession } = await import("./firebase-token.server");
-  return { agentId: await openAgentSession(getCookie(COOKIE)) };
-});
-
-export const listAgentNames = createServerFn({ method: "GET" }).handler(
-  async () => {
-    const agents = await firebaseListAgents();
-    return agents.map((a) => ({
-      id: a.id,
-      name: a.name,
-      email: "",
-      role: a.role,
-      status: a.status,
-    }));
-  },
-);
-
-export const signInAgent = createServerFn({ method: "POST" })
-  .validator((d: { agentId: string; password: string }) => d)
-  .handler(async ({ data }) => {
-    const { hashAgentPassword } = await import("./session");
-    const proof = await hashAgentPassword(data.agentId, data.password || "");
-    const agents = await firebaseListAgents();
-    const agent = agents.find((a) => a.id === data.agentId);
-    if (!agent?.passwordHash || agent.passwordHash !== proof) {
-      throw new Error("Wrong password");
-    }
-    await seal(agent.id);
-    return { agentId: agent.id };
+export const whoAmI = createServerFn({ method: "GET" })
+  .middleware([crmFn])
+  .handler(async () => {
+    const agent = await requireAgent();
+    return { agentId: agent.id, email: agent.email, name: agent.name };
   });
 
-export const resumeSession = createServerFn({ method: "POST" })
-  .validator((d: { agentId: string; proof: string }) => d)
-  .handler(async ({ data }) => {
-    if (!/^[a-f0-9]{64}$/.test(data.proof || "")) {
-      throw new Error("Sign in required");
-    }
-    const agents = await firebaseListAgents();
-    const agent = agents.find((a) => a.id === data.agentId);
-    if (!agent?.passwordHash || agent.passwordHash !== data.proof) {
-      throw new Error("Sign in required");
-    }
-    await seal(agent.id);
-    return { agentId: agent.id };
-  });
-
-export const signOutAgent = createServerFn({ method: "POST" }).handler(
-  async () => {
-    deleteCookie(COOKIE, { path: COOKIE_PATH });
-    return { ok: true };
-  },
-);
-
-export const getAllData = createServerFn({ method: "GET" }).handler(
-  async (): Promise<ZynloData> => {
+export const getAllData = createServerFn({ method: "GET" })
+  .middleware([crmFn])
+  .handler(async (): Promise<ZynloData> => {
     await requireAgent();
     return hideSecrets(await firebaseLoadAll());
-  },
-);
-
-export const getStorageMode = createServerFn({ method: "GET" }).handler(
-  async () => ({
-    source: "firebase" as const,
-    cloud: true,
-    label: "Firebase Realtime Database (shared)",
-  }),
-);
+  });
 
 export const saveAgent = createServerFn({ method: "POST" })
-  .validator(
-    (d: {
-      id?: string;
-      name: string;
-      email?: string;
-      role?: string;
-      status?: string;
-      password?: string;
-      passwordHash?: string;
-    }) => d,
-  )
+  .middleware([crmFn])
+  .validator((data: unknown) => parseInput(saveAgentInput, data))
   .handler(async ({ data }): Promise<Agent> => {
     await requireAgent();
-    let passwordHash = data.passwordHash;
-    if (data.password?.trim()) {
-      const { hashAgentPassword } = await import("./session");
-      const id = data.id || "";
-      passwordHash = await hashAgentPassword(id, data.password);
-    }
-    const saved = await firebaseUpsertAgent({ ...data, passwordHash });
+    const saved = await firebaseUpsertAgent(data);
     return hideAgent(saved);
   });
 
 export const deleteAgent = createServerFn({ method: "POST" })
-  .validator((d: { id: string }) => d)
+  .middleware([crmFn])
+  .validator((data: unknown) => parseInput(idInput, data))
   .handler(async ({ data }) => {
     await requireAgent();
     await firebaseDeleteAgent(data.id);
@@ -157,24 +88,16 @@ export const deleteAgent = createServerFn({ method: "POST" })
   });
 
 export const saveCustomer = createServerFn({ method: "POST" })
-  .validator(
-    (d: {
-      id?: string;
-      name: string;
-      phone: string;
-      email?: string;
-      company?: string;
-      clientId?: string | null;
-      notes?: string;
-    }) => d,
-  )
+  .middleware([crmFn])
+  .validator((data: unknown) => parseInput(saveCustomerInput, data))
   .handler(async ({ data }): Promise<Customer> => {
     await requireAgent();
     return firebaseUpsertCustomer(data);
   });
 
 export const deleteCustomer = createServerFn({ method: "POST" })
-  .validator((d: { id: string }) => d)
+  .middleware([crmFn])
+  .validator((data: unknown) => parseInput(idInput, data))
   .handler(async ({ data }) => {
     await requireAgent();
     await firebaseDeleteCustomer(data.id);
@@ -182,26 +105,16 @@ export const deleteCustomer = createServerFn({ method: "POST" })
   });
 
 export const saveClient = createServerFn({ method: "POST" })
-  .validator(
-    (d: {
-      id?: string;
-      name: string;
-      industry?: string;
-      phone?: string;
-      email?: string;
-      website?: string;
-      status?: string;
-      address?: string;
-      notes?: string;
-    }) => d,
-  )
+  .middleware([crmFn])
+  .validator((data: unknown) => parseInput(saveClientInput, data))
   .handler(async ({ data }): Promise<Client> => {
     await requireAgent();
     return firebaseUpsertClient(data);
   });
 
 export const deleteClient = createServerFn({ method: "POST" })
-  .validator((d: { id: string }) => d)
+  .middleware([crmFn])
+  .validator((data: unknown) => parseInput(idInput, data))
   .handler(async ({ data }) => {
     await requireAgent();
     await firebaseDeleteClient(data.id);
@@ -209,32 +122,16 @@ export const deleteClient = createServerFn({ method: "POST" })
   });
 
 export const saveCall = createServerFn({ method: "POST" })
-  .validator(
-    (d: {
-      id?: string;
-      datetime: string;
-      agentId?: string;
-      customerId: string;
-      clientId?: string | null;
-      type?: string;
-      duration: number;
-      outcome: string;
-      rating?: number | null;
-      ratingScale?: 5 | 10;
-      notes?: string;
-      followUpAt?: string | null;
-      source?: "manual" | "telecom";
-      csvCounted?: boolean;
-      qa?: Call["qa"];
-    }) => d,
-  )
+  .middleware([crmFn])
+  .validator((data: unknown) => parseInput(saveCallInput, data))
   .handler(async ({ data }): Promise<Call> => {
     await requireAgent();
     return firebaseUpsertCall(data);
   });
 
 export const deleteCall = createServerFn({ method: "POST" })
-  .validator((d: { id: string }) => d)
+  .middleware([crmFn])
+  .validator((data: unknown) => parseInput(idInput, data))
   .handler(async ({ data }) => {
     await requireAgent();
     await firebaseDeleteCall(data.id);
@@ -242,29 +139,16 @@ export const deleteCall = createServerFn({ method: "POST" })
   });
 
 export const saveMessage = createServerFn({ method: "POST" })
-  .validator(
-    (d: {
-      id?: string;
-      datetime: string;
-      agentId: string;
-      customerId: string;
-      clientId?: string | null;
-      channel?: string;
-      direction?: string;
-      subject?: string;
-      body: string;
-      status?: string;
-      notes?: string;
-      followUpAt?: string | null;
-    }) => d,
-  )
+  .middleware([crmFn])
+  .validator((data: unknown) => parseInput(saveMessageInput, data))
   .handler(async ({ data }): Promise<Message> => {
     await requireAgent();
-    return firebaseUpsertMessage(data);
+    return firebaseUpsertMessage({ ...data, agentId: data.agentId || "" });
   });
 
 export const deleteMessage = createServerFn({ method: "POST" })
-  .validator((d: { id: string }) => d)
+  .middleware([crmFn])
+  .validator((data: unknown) => parseInput(idInput, data))
   .handler(async ({ data }) => {
     await requireAgent();
     await firebaseDeleteMessage(data.id);
@@ -272,7 +156,8 @@ export const deleteMessage = createServerFn({ method: "POST" })
   });
 
 export const mergeCustomers = createServerFn({ method: "POST" })
-  .validator((d: { keepId: string; dropId: string }) => d)
+  .middleware([crmFn])
+  .validator((data: unknown) => parseInput(mergeInput, data))
   .handler(async ({ data }) => {
     await requireAgent();
     await firebaseMergeCustomers(data.keepId, data.dropId);
