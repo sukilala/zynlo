@@ -1,7 +1,9 @@
 /**
  * Pure Firebase page shaping. No network, no full-database sort.
- * Pages are ordered by record id (`$key`), which needs no .indexOn rule.
- * Name and datetime order is applied once the browser has every page.
+ * Pages are read by record id (`$key`), which needs no .indexOn rule.
+ * The REST payload is not ordered, so each page is sorted into $key order
+ * here before the next cursor is chosen. Name and datetime order is applied
+ * once the browser has every page.
  */
 import {
   QA_PARTS,
@@ -66,6 +68,33 @@ export function rtdbPageQuery(cursor: string | null, limit: number): string {
   return params.toString();
 }
 
+const FIREBASE_INT_MIN = -2147483648;
+const FIREBASE_INT_MAX = 2147483647;
+
+/** Same integer-key rule Firebase uses for `$key` order. */
+function firebaseIntKey(key: string): number | null {
+  if (!/^-?\d{1,10}$/.test(key)) return null;
+  const value = Number(key);
+  if (!Number.isInteger(value) || value < FIREBASE_INT_MIN || value > FIREBASE_INT_MAX) {
+    return null;
+  }
+  return value;
+}
+
+/** Record-id order: 32-bit integer keys first, then every other key A to Z. */
+export function compareFirebaseKey(a: string, b: string): number {
+  if (a === b) return 0;
+  const ai = firebaseIntKey(a);
+  const bi = firebaseIntKey(b);
+  if (ai !== null && bi !== null) {
+    if (ai !== bi) return ai - bi;
+    return a.length - b.length;
+  }
+  if (ai !== null) return -1;
+  if (bi !== null) return 1;
+  return a < b ? -1 : 1;
+}
+
 export function orderedRows(raw: unknown): OrderedRow[] {
   if (raw == null) return [];
   const rows: OrderedRow[] = [];
@@ -90,20 +119,19 @@ export function orderedRows(raw: unknown): OrderedRow[] {
 
 /**
  * `cursor` is the last key returned to the client. Firebase includes it again
- * because startAt is inclusive. If that key was deleted, the response already
- * starts at the next key, so it is kept as-is (do not re-sort; $key order is
- * not plain string order for numeric ids).
+ * because startAt is inclusive. Keys are sorted into `$key` order first:
+ * a filtered REST object does not keep that order, and trusting the raw
+ * order skips every record that sits between the wrong cursor and the next page.
  */
 export function sliceOrderedRows(
   rows: OrderedRow[],
   limit: number,
   cursor: string | null,
 ): { rows: OrderedRow[]; nextCursor: string | null } {
-  let list = rows;
-  if (cursor) {
-    const idx = list.findIndex((row) => row.key === cursor);
-    if (idx >= 0) list = list.slice(idx + 1);
-  }
+  const sorted = rows.slice().sort((a, b) => compareFirebaseKey(a.key, b.key));
+  const list = cursor
+    ? sorted.filter((row) => compareFirebaseKey(row.key, cursor) > 0)
+    : sorted;
   const page = list.slice(0, limit);
   const nextCursor = list.length > limit ? (page[page.length - 1]?.key ?? null) : null;
   return { rows: page, nextCursor };

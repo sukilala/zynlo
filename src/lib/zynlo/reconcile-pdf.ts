@@ -1,5 +1,6 @@
-import type { Agent, Call, CallType, Customer, ZynloData } from "./types";
-import { findCustomerByPhone, phoneDigits } from "./utils";
+import { pbxLinkFor, type PbxAgentLink } from "./pbx-agents.ts";
+import type { Agent, Call, CallType, Customer, ZynloData } from "./types.ts";
+import { canonicalPhone, findCustomerByPhone } from "./utils.ts";
 
 /** Duplicate Cloud Talk legs of the same call. */
 const CSV_DEDUPE_MS = 90 * 1000;
@@ -15,7 +16,13 @@ export type TelecomRow = {
   durationRaw: string;
   disposition: string;
   agentHint: string;
+  /** PBX agent column, unchanged by CRM mapping. */
+  pbxName: string;
   agentId: string;
+  /** PBX extension, when the file has one. */
+  extension: string;
+  /** Set when this PBX agent is not a CRM user. The call is still kept. */
+  unmappedAgent: string;
   uid: string;
 };
 
@@ -36,6 +43,19 @@ export type DirectionFix = {
   toDuration: number;
 };
 
+export type AgentFix = {
+  callId: string;
+  phone: string;
+  datetime: string;
+  toAgentId: string;
+  toAgentName: string;
+};
+
+export type UnmappedPbxAgent = {
+  label: string;
+  count: number;
+};
+
 export type ReconcilePreview = {
   filename: string;
   answered: number;
@@ -47,6 +67,8 @@ export type ReconcilePreview = {
   alreadyInbound: number;
   alreadyOutbound: number;
   directionFixes: DirectionFix[];
+  agentFixes: AgentFix[];
+  unmappedAgents: UnmappedPbxAgent[];
   matchedIds: string[];
   detectedAgentId: string;
   detectedAgentName: string;
@@ -75,8 +97,8 @@ function extractPhone(block: string): string {
   const local = nums.find((n) => n.startsWith("0") && !n.startsWith("011"));
   if (local) return local;
   const nine = nums.find((n) => n.length === 9 && n[0] === "7");
-  if (nine) return `0${nine}`;
-  return nums.find((n) => n.length >= 9) || "";
+  if (nine) return canonicalPhone(`0${nine}`);
+  return canonicalPhone(nums.find((n) => n.length >= 9) || "");
 }
 
 function typeFromLabel(raw: string): CallType | null {
@@ -291,7 +313,10 @@ export function parseTelecomText(
       durationRaw,
       disposition: normalizeDisposition(dispMatch[1], hhmmssToMinutes(durationRaw)),
       agentHint: generatedBy,
+      pbxName: generatedBy,
       agentId: "",
+      extension: "",
+      unmappedAgent: "",
       uid: `${toIsoLocal(dtMatch[1])}|${phone}|${type}|${durationRaw}`,
     });
   }
@@ -382,10 +407,28 @@ function isQueueAnsweredCsv(headers: string[]): boolean {
   return hasQueue || hasWait || hasDisc || hasPos;
 }
 
+function isOutboundCdr(headers: string[]): boolean {
+  const hasDest = headerIndex(headers, ["destination", "called number", "dialed"]) >= 0;
+  const hasDisp = headerIndex(headers, ["disposition", "call status", "result"]) >= 0;
+  const hasCaller = headerIndex(headers, ["caller", "caller id"]) >= 0;
+  return hasDest && hasDisp && !hasCaller;
+}
+
 export function csvIsQueueAnswered(text: string): boolean {
   const table = parseCsvRows(text);
   if (table.length < 2) return false;
   return isQueueAnsweredCsv(table[findHeaderRow(table)].map(normHeader));
+}
+
+export function csvIsOutboundCdr(text: string): boolean {
+  const table = parseCsvRows(text);
+  if (table.length < 2) return false;
+  return isOutboundCdr(table[findHeaderRow(table)].map(normHeader));
+}
+
+/** Extension column only. "Extension name" stays the agent column. */
+function extensionIndex(headers: string[]): number {
+  return headers.findIndex((header) => header === "extension" || header === "ext");
 }
 
 function findHeaderRow(table: string[][]): number {
@@ -481,6 +524,8 @@ export function parseTelecomCsv(
   const headerAt = findHeaderRow(table);
   const headers = table[headerAt].map(normHeader);
   const queueAnswered = isQueueAnsweredCsv(headers);
+  const direction: CallType | null =
+    fileDirection || (queueAnswered ? "Inbound" : isOutboundCdr(headers) ? "Outbound" : null);
   const iDate = headerIndex(headers, ["date", "datetime", "start time"]);
   const iCaller = headerIndex(headers, [
     "caller id",
@@ -503,6 +548,7 @@ export function parseTelecomCsv(
   const iType = headerIndex(headers, ["call type", "direction", "type"]);
   const iTalk = headerIndex(headers, ["talk time", "billsec", "talk"]);
   const iDur = headerIndex(headers, ["duration", "total duration", "call duration"]);
+  const iExt = extensionIndex(headers);
   const iAgent = headerIndex(headers, [
     "agent",
     "operator",
@@ -535,8 +581,7 @@ export function parseTelecomCsv(
       (iDate >= 0 ? cells[iDate] : "") || joined,
     );
     const cellType = typeFromLabel(typeRaw) || typeFromLabel(joined);
-    const type: CallType | null =
-      fileDirection || cellType || (queueAnswered ? "Inbound" : null);
+    const type: CallType | null = direction || cellType;
     if (!type) continue;
     const phoneSrc =
       type === "Outbound"
@@ -556,13 +601,14 @@ export function parseTelecomCsv(
       : normalizeDisposition(disp, talk.min);
     let dur = talk.min > 0 ? talk : disposition === "ANSWERED" ? total : { min: 0, raw: talk.raw || total.raw };
     if (inboundQueue && dur.min === 0 && total.min > 0) dur = total;
-    if (disposition === "ANSWERED" && dur.min === 0) {
+    const durationWasParsed = (iTalk >= 0 && (cells[iTalk] || "").trim()) || (iDur >= 0 && (cells[iDur] || "").trim());
+    if (disposition === "ANSWERED" && dur.min === 0 && !durationWasParsed) {
       const clocks = joined.match(/\d{1,2}:\d{2}:\d{2}/g) || [];
       const dateRaw = iDate >= 0 ? cells[iDate] || "" : "";
       const extra = clocks.find((c) => !dateRaw.includes(c));
       if (extra) dur = parseDurationCell(extra);
     }
-    const agentHint = (iAgent >= 0 ? cells[iAgent] : "") || generatedBy;
+    const rowAgent = (iAgent >= 0 ? cells[iAgent] || "" : "").trim();
     const uid = (iUid >= 0 ? cells[iUid] || "" : "").trim()
       || `${datetime}|${phone}|${type}|${dur.raw}`;
     rows.push({
@@ -573,8 +619,11 @@ export function parseTelecomCsv(
       durationMin: dur.min,
       durationRaw: dur.raw,
       disposition,
-      agentHint: agentHint.trim(),
+      agentHint: rowAgent || generatedBy.trim(),
+      pbxName: rowAgent,
       agentId: "",
+      extension: iExt >= 0 ? (cells[iExt] || "").replace(/\D/g, "") : "",
+      unmappedAgent: "",
       uid,
     });
   }
@@ -621,8 +670,8 @@ export function answeredCustomerRows(rows: TelecomRow[]): TelecomRow[] {
 }
 
 function samePhone(a: string, b: string): boolean {
-  const da = phoneDigits(a);
-  const db = phoneDigits(b);
+  const da = canonicalPhone(a);
+  const db = canonicalPhone(b);
   if (da.length < 8 || db.length < 8) return false;
   if (da === db) return true;
   const a9 = da.slice(-9);
@@ -638,7 +687,7 @@ function callTime(value: string): number {
 }
 
 function phoneTail(phone: string): string {
-  const d = phoneDigits(phone);
+  const d = canonicalPhone(phone);
   return d.length >= 9 ? d.slice(-9) : d;
 }
 
@@ -706,6 +755,75 @@ export function matchExistingCall(
   return closestCall(row, data, sameTypeOnly, index, used);
 }
 
+function crmAgentForLink(link: PbxAgentLink, agents: Agent[]): Agent | undefined {
+  const email = link.crmEmail.trim().toLowerCase();
+  if (email) {
+    const byEmail = agents.find((agent) => (agent.email || "").trim().toLowerCase() === email);
+    if (byEmail) return byEmail;
+  }
+  const name = link.crmName.trim().toLowerCase();
+  const exact = agents.find((agent) => agent.name.trim().toLowerCase() === name);
+  if (exact) return exact;
+  const id = matchAgentId(link.crmName, agents);
+  return agents.find((agent) => agent.id === id);
+}
+
+function pbxLabel(name: string, extension: string): string {
+  const who = (name || "").trim();
+  const ext = (extension || "").replace(/\D/g, "");
+  if (who && ext) return `${who} (extension ${ext})`;
+  if (who) return who;
+  if (ext) return `extension ${ext}`;
+  return "";
+}
+
+/**
+ * Each CSV row keeps its own agent. A PBX name that is not a CRM user is not
+ * replaced with whoever the file is named after.
+ */
+export function assignTelecomRows(
+  rows: TelecomRow[],
+  agents: Agent[],
+  fileAgentId = "",
+): TelecomRow[] {
+  const fileAgent = agents.find((agent) => agent.id === fileAgentId);
+  return rows.map((row) => {
+    const sourceName = row.pbxName || "";
+    const link = pbxLinkFor(sourceName, row.extension);
+    if (link) {
+      const agent = crmAgentForLink(link, agents);
+      const label = pbxLabel(sourceName, row.extension);
+      if (agent) {
+        return { ...row, agentId: agent.id, agentHint: agent.name, unmappedAgent: "" };
+      }
+      return {
+        ...row,
+        agentId: "",
+        agentHint: link.crmName,
+        unmappedAgent: `${label} is mapped to ${link.crmName}, who is not in the CRM`,
+      };
+    }
+    const fromRow = matchAgentId(sourceName, agents);
+    if (fromRow) {
+      const agent = agents.find((item) => item.id === fromRow);
+      return {
+        ...row,
+        agentId: fromRow,
+        agentHint: agent?.name || sourceName,
+        unmappedAgent: "",
+      };
+    }
+    const named = pbxLabel(sourceName, row.extension);
+    if (sourceName || (row.extension || "").trim()) {
+      return { ...row, agentId: "", agentHint: named || sourceName, unmappedAgent: named || sourceName };
+    }
+    if (fileAgent) {
+      return { ...row, agentId: fileAgent.id, agentHint: row.agentHint || fileAgent.name, unmappedAgent: "" };
+    }
+    return { ...row, unmappedAgent: "" };
+  });
+}
+
 export function buildReconcilePreviewFromRows(
   filename: string,
   all: TelecomRow[],
@@ -714,11 +832,13 @@ export function buildReconcilePreviewFromRows(
   fileDirection: CallType | null = null,
   queueAnswered = false,
 ): ReconcilePreview {
-  const answered = answeredCustomerRows(all);
+  const tagged = assignTelecomRows(all, agents);
+  const answered = answeredCustomerRows(tagged);
   const callIndex = buildCallIndex(data);
   const already: TelecomRow[] = [];
   const missing: TelecomRow[] = [];
   const directionFixes: DirectionFix[] = [];
+  const agentFixes: AgentFix[] = [];
   const matchedIds: string[] = [];
   const seen = new Set<string>();
 
@@ -742,11 +862,28 @@ export function buildReconcilePreviewFromRows(
           toDuration,
         });
       }
+      if (row.agentId && row.agentId !== (same.agentId || "")) {
+        if (!same.agentId) {
+          agentFixes.push({
+            callId: same.id,
+            phone: row.phone,
+            datetime: row.datetime,
+            toAgentId: row.agentId,
+            toAgentName: row.agentHint,
+          });
+        }
+      }
       already.push(row);
       continue;
     }
     missing.push(row);
   }
+  const unmappedCounts = new Map<string, number>();
+  for (const row of answered) {
+    if (!row.unmappedAgent) continue;
+    unmappedCounts.set(row.unmappedAgent, (unmappedCounts.get(row.unmappedAgent) || 0) + 1);
+  }
+  const unmappedAgents = [...unmappedCounts.entries()].map(([label, count]) => ({ label, count }));
   const names = [
     ...new Set(
       answered
@@ -826,6 +963,8 @@ export function buildReconcilePreviewFromRows(
     alreadyInbound: already.filter((r) => r.type === "Inbound").length,
     alreadyOutbound: already.filter((r) => r.type === "Outbound").length,
     directionFixes,
+    agentFixes,
+    unmappedAgents,
     matchedIds,
     detectedAgentId,
     detectedAgentName,
@@ -842,7 +981,7 @@ export function buildReconcilePreview(
 ): ReconcilePreview {
   const dir = detectCallDirection(filename, text);
   const queue = looksLikeCsv(text) && csvIsQueueAnswered(text);
-  const fileDir = dir || (queue ? "Inbound" : null);
+  const fileDir = dir || (queue ? "Inbound" : csvIsOutboundCdr(text) ? "Outbound" : null);
   const all = looksLikeCsv(text)
     ? parseTelecomCsv(text, fileDir)
     : parseTelecomText(text, fileDir);
@@ -888,17 +1027,7 @@ function stampAgents(
   const fromFile = detectAgentFromFilename(file.name, agents);
   const fromGen = matchAgentId(generatedBy, agents);
   const fileAgentId = fromFile || fromGen;
-  const fileHint =
-    agents.find((a) => a.id === fileAgentId)?.name || generatedBy;
-  return rows.map((r) => {
-    const fromRow = matchAgentId(r.agentHint, agents);
-    const agentId = fromRow || fileAgentId;
-    return {
-      ...r,
-      agentId,
-      agentHint: r.agentHint || fileHint,
-    };
-  });
+  return assignTelecomRows(rows, agents, fileAgentId);
 }
 
 export async function parseTelecomFile(
@@ -915,7 +1044,7 @@ export async function parseTelecomFile(
     const queueAnswered = csvIsQueueAnswered(text);
     const fileDirection =
       detectCallDirection(file.name, text) ||
-      (queueAnswered ? "Inbound" : null);
+      (queueAnswered ? "Inbound" : csvIsOutboundCdr(text) ? "Outbound" : null);
     const generatedBy = extractGeneratedBy(text);
     return {
       rows: stampAgents(
