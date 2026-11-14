@@ -4,8 +4,16 @@ import { canonicalPhone, findCustomerByPhone } from "./utils.ts";
 
 /** Duplicate Cloud Talk legs of the same call. */
 const CSV_DEDUPE_MS = 90 * 1000;
-/** Manual logs are minute precision. Wider than this merges two real calls. */
-const CRM_MATCH_MS = 3 * 60 * 1000;
+/** Hand logs are to the minute and are often 2–4 minutes earlier than the PBX. */
+const CRM_MATCH_MS = 5 * 60 * 1000;
+/** A one-digit number can pair across agents only inside about a minute. */
+const AGENT_DIFF_MS = 60 * 1000;
+/** A different-number log should not prefer a call this short when a longer one is close. */
+const SHORT_TALK_SEC = 5;
+/** Penalty so a call of 5 seconds or less loses to a longer call within about a minute. */
+const SHORT_CALL_PENALTY_MS = 60 * 1000;
+/** Larger than any sum of real time gaps, so a real pair beats leaving a call unmatched. */
+const MATCH_FORBIDDEN = 1_000_000_000;
 
 export type TelecomRow = {
   datetime: string;
@@ -56,6 +64,50 @@ export type UnmappedPbxAgent = {
   count: number;
 };
 
+/** A phone-system call paired with a log whose number is not the same. */
+export type NumberDiffMatch = {
+  callId: string;
+  csvPhone: string;
+  crmPhone: string;
+  datetime: string;
+  crmDatetime: string;
+  type: CallType;
+  agentId: string;
+  agentName: string;
+  crmAgentId: string;
+  crmAgentName: string;
+  /**
+   * one-digit = a single wrong, missing, or extra digit on the same agent.
+   * other-number = a different number on the same agent.
+   * agent-differs = one digit off, within about a minute, and the agents are not the same.
+   */
+  kind: "one-digit" | "other-number" | "agent-differs";
+};
+
+export type AgentReconcileTotal = {
+  agentId: string;
+  agentName: string;
+  /** Answered rows in the phone-system files. */
+  phoneSystem: number;
+  /** Those rows that paired with a log, including a different number. */
+  logged: number;
+  /** Phone-system rows that still have no log. */
+  missing: number;
+};
+
+/** A log on a file day that paired with nothing. Shown for review; not hidden unless ticked. */
+export type UnmatchedCrmCall = {
+  callId: string;
+  phone: string;
+  datetime: string;
+  type: CallType;
+  agentId: string;
+  agentName: string;
+  duration: number;
+  /** Another log has this number in the same minute. */
+  duplicate: boolean;
+};
+
 export type ReconcilePreview = {
   filename: string;
   answered: number;
@@ -70,10 +122,21 @@ export type ReconcilePreview = {
   agentFixes: AgentFix[];
   unmappedAgents: UnmappedPbxAgent[];
   matchedIds: string[];
+  numberDiffs: NumberDiffMatch[];
+  agentTotals: AgentReconcileTotal[];
+  unmatchedCrm: UnmatchedCrmCall[];
+  /**
+   * Exact-number matches that would cut a log of 1 minute or more to under 10 seconds.
+   * Not applied unless the id is in shrinkIds.
+   */
+  optionalShrinks: DirectionFix[];
   detectedAgentId: string;
   detectedAgentName: string;
   detectedDirection: CallType | null;
+  /** Empty until the user ticks rows in unmatchedCrm. Apply hides only these. */
   extraIds: string[];
+  /** Empty until the user ticks rows in optionalShrinks. */
+  shrinkIds: string[];
 };
 
 function hhmmssToMinutes(raw: string): number {
@@ -824,35 +887,333 @@ export function assignTelecomRows(
   });
 }
 
+type MatchKind = "exact" | "one-digit" | "other-number" | "agent-differs";
+
+type CrmCand = {
+  call: Call;
+  phone: string;
+  time: number;
+  dir: "Inbound" | "Outbound";
+  agentId: string;
+};
+
+/** Hidden, no-answer, and voicemail logs are not a cover for an answered phone-system call. */
+function logCanCover(call: Call): boolean {
+  if (call.csvCounted === false) return false;
+  if (call.outcome === "No Answer" || call.outcome === "Voicemail") return false;
+  return true;
+}
+
+function crmCandidates(data: ZynloData): CrmCand[] {
+  const customersById: Record<string, Customer> = {};
+  for (const customer of data.customers) customersById[customer.id] = customer;
+  const out: CrmCand[] = [];
+  for (const call of data.calls) {
+    const dir =
+      call.type === "Outbound" ? "Outbound" : call.type === "Inbound" ? "Inbound" : "";
+    if (!dir) continue;
+    const time = callTime(call.datetime);
+    if (!time) continue;
+    out.push({
+      call,
+      phone: customersById[call.customerId]?.phone || "",
+      time,
+      dir,
+      agentId: call.agentId || "",
+    });
+  }
+  return out;
+}
+
+/** Same length and one substitution, or one inserted or dropped digit. */
+function oneDigitOff(a: string, b: string): boolean {
+  const da = canonicalPhone(a);
+  const db = canonicalPhone(b);
+  if (da.length < 9 || db.length < 9 || da === db) return false;
+  if (da.length === db.length) {
+    let mismatches = 0;
+    for (let i = 0; i < da.length; i++) {
+      if (da[i] !== db[i]) mismatches += 1;
+      if (mismatches > 1) return false;
+    }
+    return mismatches === 1;
+  }
+  if (Math.abs(da.length - db.length) !== 1) return false;
+  const shorter = da.length < db.length ? da : db;
+  const longer = da.length < db.length ? db : da;
+  let i = 0;
+  let j = 0;
+  let skipped = false;
+  while (i < shorter.length && j < longer.length) {
+    if (shorter[i] === longer[j]) {
+      i += 1;
+      j += 1;
+    } else if (!skipped) {
+      skipped = true;
+      j += 1;
+    } else {
+      return false;
+    }
+  }
+  return i === shorter.length && (skipped || j < longer.length);
+}
+
+function talkSeconds(row: TelecomRow): number {
+  const match = (row.durationRaw || "").trim().match(/^(\d{1,2}):(\d{2}):(\d{2})$/);
+  if (match) return Number(match[1]) * 3600 + Number(match[2]) * 60 + Number(match[3]);
+  return Math.round((Number(row.durationMin) || 0) * 60);
+}
+
+function minuteIdentity(dir: string, datetime: string, phone: string): string {
+  const digits = canonicalPhone(phone);
+  const tail = digits.length >= 9 ? digits.slice(-9) : digits;
+  const iso = datetime.includes("T") ? datetime : datetime.replace(" ", "T");
+  return `${dir}|${iso.slice(0, 16)}|${tail}`;
+}
+
+/**
+ * Leftovers after the exact-number pass.
+ * Same agent can use a different number. A one-digit typo can also pair when
+ * the log has no agent yet. Two known agents pair on a one-digit number only
+ * inside about a minute, and that pair is labelled agent-differs.
+ */
+function secondPassKind(row: TelecomRow, cand: CrmCand, delta: number): MatchKind | null {
+  if (samePhone(row.phone, cand.phone)) return "exact";
+  if (canonicalPhone(cand.phone).length < 9) return null;
+  const digit = oneDigitOff(row.phone, cand.phone);
+  const sameAgent = Boolean(row.agentId) && row.agentId === cand.agentId;
+  const agentsDiffer =
+    Boolean(row.agentId) && Boolean(cand.agentId) && row.agentId !== cand.agentId;
+  if (digit && agentsDiffer) return delta <= AGENT_DIFF_MS ? "agent-differs" : null;
+  if (sameAgent) return digit ? "one-digit" : "other-number";
+  if (!digit) return null;
+  return "one-digit";
+}
+
+/**
+ * Maximum-cardinality minimum-cost assignment.
+ * Columns past `rightCount` are dummies. A forbidden cell costs MATCH_FORBIDDEN.
+ */
+function assignMinCost(
+  leftCount: number,
+  rightCount: number,
+  edges: { left: number; right: number; cost: number }[],
+): { left: number; right: number }[] {
+  if (leftCount === 0 || rightCount === 0 || edges.length === 0) return [];
+  const cols = Math.max(leftCount, rightCount);
+  const matrix = Array.from({ length: leftCount }, () =>
+    Array<number>(cols).fill(MATCH_FORBIDDEN),
+  );
+  for (const edge of edges) {
+    if (edge.left < 0 || edge.left >= leftCount || edge.right < 0 || edge.right >= rightCount) {
+      continue;
+    }
+    if (edge.cost < matrix[edge.left][edge.right]) {
+      matrix[edge.left][edge.right] = edge.cost;
+    }
+  }
+  const columnOf = hungarian(matrix);
+  const pairs: { left: number; right: number }[] = [];
+  for (let row = 0; row < leftCount; row++) {
+    const col = columnOf[row];
+    if (col == null || col < 0 || col >= rightCount) continue;
+    if (matrix[row][col] >= MATCH_FORBIDDEN / 2) continue;
+    pairs.push({ left: row, right: col });
+  }
+  return pairs;
+}
+
+/** Rectangular Hungarian. `cost` has one row per left node and at least that many columns. */
+function hungarian(cost: number[][]): number[] {
+  const n = cost.length;
+  const m = cost[0]?.length ?? 0;
+  const columnOf = Array<number>(n).fill(-1);
+  if (n === 0 || m < n) return columnOf;
+  const u = Array<number>(n + 1).fill(0);
+  const v = Array<number>(m + 1).fill(0);
+  const p = Array<number>(m + 1).fill(0);
+  const way = Array<number>(m + 1).fill(0);
+  for (let i = 1; i <= n; i++) {
+    p[0] = i;
+    let j0 = 0;
+    const minv = Array<number>(m + 1).fill(Number.POSITIVE_INFINITY);
+    const used = Array<boolean>(m + 1).fill(false);
+    do {
+      used[j0] = true;
+      const i0 = p[j0];
+      let delta = Number.POSITIVE_INFINITY;
+      let j1 = 0;
+      for (let j = 1; j <= m; j++) {
+        if (used[j]) continue;
+        const cur = cost[i0 - 1][j - 1] - u[i0] - v[j];
+        if (cur < minv[j]) {
+          minv[j] = cur;
+          way[j] = j0;
+        }
+        if (minv[j] < delta) {
+          delta = minv[j];
+          j1 = j;
+        }
+      }
+      for (let j = 0; j <= m; j++) {
+        if (used[j]) {
+          u[p[j]] += delta;
+          v[j] -= delta;
+        } else {
+          minv[j] -= delta;
+        }
+      }
+      j0 = j1;
+    } while (p[j0] !== 0);
+    do {
+      const j1 = way[j0];
+      p[j0] = p[j1];
+      j0 = j1;
+    } while (j0 !== 0);
+  }
+  for (let j = 1; j <= m; j++) {
+    if (p[j] > 0 && p[j] <= n) columnOf[p[j] - 1] = j - 1;
+  }
+  return columnOf;
+}
+
+function agentDisplayName(id: string, agents: Agent[], fallback: string): string {
+  if (!id) return fallback || "Unassigned";
+  return agents.find((agent) => agent.id === id)?.name || fallback || "Unassigned";
+}
+
 export function buildReconcilePreviewFromRows(
   filename: string,
   all: TelecomRow[],
   data: ZynloData,
   agents: Agent[] = [],
   fileDirection: CallType | null = null,
-  queueAnswered = false,
+  // Callers still pass whether the batch included a queue file. Review follows
+  // the directions that are actually in the rows, so this flag is not used here.
+  _queueAnswered = false,
 ): ReconcilePreview {
   const tagged = assignTelecomRows(all, agents);
   const answered = answeredCustomerRows(tagged);
-  const callIndex = buildCallIndex(data);
+  const cands = crmCandidates(data);
   const already: TelecomRow[] = [];
   const missing: TelecomRow[] = [];
   const directionFixes: DirectionFix[] = [];
+  const optionalShrinks: DirectionFix[] = [];
   const agentFixes: AgentFix[] = [];
+  const numberDiffs: NumberDiffMatch[] = [];
   const matchedIds: string[] = [];
-  const seen = new Set<string>();
+  const matchByRow = new Map<number, { cand: CrmCand; kind: MatchKind }>();
+  const used = new Set<string>();
 
-  for (const row of answered) {
-    const same = closestCall(row, data, true, callIndex, seen);
-    if (same && !seen.has(same.id)) {
-      seen.add(same.id);
-      matchedIds.push(same.id);
+  const keepPairs = (
+    pairs: { left: number; right: number; kind: MatchKind }[],
+  ) => {
+    for (const pair of pairs) {
+      const cand = cands[pair.right];
+      if (!cand || used.has(cand.call.id) || matchByRow.has(pair.left)) continue;
+      used.add(cand.call.id);
+      matchByRow.set(pair.left, { cand, kind: pair.kind });
+    }
+  };
+
+  const pass1: { left: number; right: number; cost: number }[] = [];
+  for (let i = 0; i < answered.length; i++) {
+    const row = answered[i];
+    const target = callTime(row.datetime);
+    if (!target || !isAnsweredDisp(row.disposition)) continue;
+    const rowDir = directionOf(row.type);
+    for (let j = 0; j < cands.length; j++) {
+      const cand = cands[j];
+      if (cand.dir !== rowDir || !samePhone(row.phone, cand.phone)) continue;
+      const delta = Math.abs(cand.time - target);
+      if (delta > CRM_MATCH_MS) continue;
+      pass1.push({ left: i, right: j, cost: delta });
+    }
+  }
+  keepPairs(
+    assignMinCost(answered.length, cands.length, pass1).map((pair) => ({
+      ...pair,
+      kind: "exact" as const,
+    })),
+  );
+
+  const leftRows: number[] = [];
+  const leftCands: number[] = [];
+  for (let i = 0; i < answered.length; i++) {
+    if (!matchByRow.has(i)) leftRows.push(i);
+  }
+  for (let j = 0; j < cands.length; j++) {
+    if (used.has(cands[j].call.id) || !logCanCover(cands[j].call)) continue;
+    leftCands.push(j);
+  }
+  const pass2: { left: number; right: number; cost: number; kind: MatchKind }[] = [];
+  for (let a = 0; a < leftRows.length; a++) {
+    const row = answered[leftRows[a]];
+    const target = callTime(row.datetime);
+    if (!target) continue;
+    const rowDir = directionOf(row.type);
+    for (let b = 0; b < leftCands.length; b++) {
+      const cand = cands[leftCands[b]];
+      if (cand.dir !== rowDir) continue;
+      const delta = Math.abs(cand.time - target);
+      if (delta > CRM_MATCH_MS) continue;
+      const kind = secondPassKind(row, cand, delta);
+      if (!kind) continue;
+      const logMin = Number(cand.call.duration) || 0;
+      const shortTalk =
+        kind !== "exact" && talkSeconds(row) <= SHORT_TALK_SEC && logMin >= 1;
+      pass2.push({
+        left: a,
+        right: b,
+        cost:
+          delta * 2 +
+          (kind === "other-number" ? 1 : 0) +
+          (shortTalk ? SHORT_CALL_PENALTY_MS * 2 : 0),
+        kind,
+      });
+    }
+  }
+  const pass2Kind = new Map<string, MatchKind>();
+  for (const edge of pass2) pass2Kind.set(`${edge.left}:${edge.right}`, edge.kind);
+  keepPairs(
+    assignMinCost(leftRows.length, leftCands.length, pass2).map((pair) => ({
+      left: leftRows[pair.left],
+      right: leftCands[pair.right],
+      kind: pass2Kind.get(`${pair.left}:${pair.right}`) || "other-number",
+    })),
+  );
+
+  for (let i = 0; i < answered.length; i++) {
+    const row = answered[i];
+    const hit = matchByRow.get(i);
+    if (!hit) {
+      missing.push(row);
+      continue;
+    }
+    const same = hit.cand.call;
+    matchedIds.push(same.id);
+    already.push(row);
+    if (hit.kind !== "exact") {
+      numberDiffs.push({
+        callId: same.id,
+        csvPhone: row.phone,
+        crmPhone: hit.cand.phone,
+        datetime: row.datetime,
+        crmDatetime: same.datetime,
+        type: row.type,
+        agentId: row.agentId,
+        agentName: agentDisplayName(row.agentId, agents, row.agentHint),
+        crmAgentId: same.agentId || "",
+        crmAgentName: agentDisplayName(same.agentId || "", agents, ""),
+        kind: hit.kind,
+      });
+    }
+    if (hit.kind === "exact") {
       const fromDuration = Number(same.duration) || 0;
       const toDuration = row.durationMin || 0;
-      const durDiff =
-        toDuration > 0 && Math.abs(toDuration - fromDuration) >= 0.05;
+      const durDiff = toDuration > 0 && Math.abs(toDuration - fromDuration) >= 0.05;
       if (durDiff) {
-        directionFixes.push({
+        const fix: DirectionFix = {
           callId: same.id,
           phone: row.phone,
           datetime: row.datetime,
@@ -860,24 +1221,98 @@ export function buildReconcilePreviewFromRows(
           to: directionOf(same.type),
           fromDuration,
           toDuration,
-        });
+        };
+        if (fromDuration >= 1 && talkSeconds(row) < 10) optionalShrinks.push(fix);
+        else directionFixes.push(fix);
       }
-      if (row.agentId && row.agentId !== (same.agentId || "")) {
-        if (!same.agentId) {
-          agentFixes.push({
-            callId: same.id,
-            phone: row.phone,
-            datetime: row.datetime,
-            toAgentId: row.agentId,
-            toAgentName: row.agentHint,
-          });
-        }
-      }
-      already.push(row);
-      continue;
     }
-    missing.push(row);
+    if (row.agentId && row.agentId !== (same.agentId || "") && !same.agentId) {
+      agentFixes.push({
+        callId: same.id,
+        phone: row.phone,
+        datetime: row.datetime,
+        toAgentId: row.agentId,
+        toAgentName: row.agentHint,
+      });
+    }
   }
+
+  const customersById: Record<string, Customer> = {};
+  for (const customer of data.customers) customersById[customer.id] = customer;
+  const matched = new Set(matchedIds);
+  const daysByDir: Record<"Inbound" | "Outbound", Set<string>> = {
+    Inbound: new Set(
+      answered
+        .filter((row) => row.type === "Inbound")
+        .map((row) => (row.datetime || "").slice(0, 10))
+        .filter(Boolean),
+    ),
+    Outbound: new Set(
+      answered
+        .filter((row) => row.type === "Outbound")
+        .map((row) => (row.datetime || "").slice(0, 10))
+        .filter(Boolean),
+    ),
+  };
+  const minuteCount = new Map<string, number>();
+  for (const call of data.calls) {
+    const dir = call.type === "Outbound" ? "Outbound" : call.type === "Inbound" ? "Inbound" : "";
+    if (!dir) continue;
+    const phone = customersById[call.customerId]?.phone || "";
+    const key = minuteIdentity(dir, call.datetime || "", phone);
+    if (key.endsWith("|") || key.split("|")[2].length < 8) continue;
+    minuteCount.set(key, (minuteCount.get(key) || 0) + 1);
+  }
+  const unmatchedCrm: UnmatchedCrmCall[] = [];
+  for (const call of data.calls) {
+    if (matched.has(call.id) || call.csvCounted === false) continue;
+    if (call.outcome === "No Answer" || call.outcome === "Voicemail") continue;
+    const dir = call.type === "Outbound" ? "Outbound" : call.type === "Inbound" ? "Inbound" : "";
+    if (!dir) continue;
+    const day = (call.datetime || "").slice(0, 10);
+    if (!day || !daysByDir[dir].has(day)) continue;
+    const phone = customersById[call.customerId]?.phone || "";
+    const key = minuteIdentity(dir, call.datetime || "", phone);
+    unmatchedCrm.push({
+      callId: call.id,
+      phone,
+      datetime: call.datetime,
+      type: dir,
+      agentId: call.agentId || "",
+      agentName: agentDisplayName(call.agentId || "", agents, ""),
+      duration: Number(call.duration) || 0,
+      duplicate: (minuteCount.get(key) || 0) > 1,
+    });
+  }
+  unmatchedCrm.sort((a, b) => a.datetime.localeCompare(b.datetime) || a.callId.localeCompare(b.callId));
+
+  const totalMap = new Map<string, AgentReconcileTotal>();
+  for (let i = 0; i < answered.length; i++) {
+    const row = answered[i];
+    const key = row.agentId || `unmapped:${row.unmappedAgent || row.agentHint || "Unassigned"}`;
+    let bucket = totalMap.get(key);
+    if (!bucket) {
+      bucket = {
+        agentId: row.agentId,
+        agentName: row.agentId
+          ? agentDisplayName(row.agentId, agents, row.agentHint)
+          : row.unmappedAgent || row.agentHint || "Unassigned",
+        phoneSystem: 0,
+        logged: 0,
+        missing: 0,
+      };
+      totalMap.set(key, bucket);
+    }
+    bucket.phoneSystem += 1;
+    if (matchByRow.has(i)) bucket.logged += 1;
+    else bucket.missing += 1;
+  }
+  const agentTotals = [...totalMap.values()].sort((a, b) => {
+    if (!a.agentId && b.agentId) return 1;
+    if (a.agentId && !b.agentId) return -1;
+    return a.agentName.localeCompare(b.agentName);
+  });
+
   const unmappedCounts = new Map<string, number>();
   for (const row of answered) {
     if (!row.unmappedAgent) continue;
@@ -898,60 +1333,6 @@ export function buildReconcilePreviewFromRows(
     detectAgentFromFilename(filename, agents) ||
     matchAgentId(names[0] || "", agents);
   const detectedAgentName = names.join(", ");
-  const extraIds: string[] = [];
-  const matched = new Set(matchedIds);
-  const inboundDays = new Set(
-    answered
-      .filter((r) => r.type === "Inbound")
-      .map((r) => (r.datetime || "").slice(0, 10))
-      .filter(Boolean),
-  );
-  const outboundDays = new Set(
-    answered
-      .filter((r) => r.type === "Outbound")
-      .map((r) => (r.datetime || "").slice(0, 10))
-      .filter(Boolean),
-  );
-
-  const hideUnmatched = (
-    dir: "Inbound" | "Outbound",
-    days: Set<string>,
-  ) => {
-    if (days.size === 0) return;
-    for (const call of data.calls) {
-      if (call.csvCounted === false) continue;
-      if (matched.has(call.id)) continue;
-      if (call.type !== dir) continue;
-      if (call.outcome === "No Answer" || call.outcome === "Voicemail") continue;
-      const day = (call.datetime || "").slice(0, 10);
-      if (!days.has(day)) continue;
-      extraIds.push(call.id);
-    }
-  };
-
-  const name = (filename || "").toLowerCase();
-  const outboundTruth =
-    fileDirection === "Outbound" ||
-    /\boutgoing\b|\boutbound\b|\bout going\b|\bout-going\b|\bdialled\b|\bdialed\b/.test(
-      name,
-    );
-  const inboundTruth =
-    fileDirection !== "Outbound" &&
-    (queueAnswered ||
-      fileDirection === "Inbound" ||
-      /\banswered\s*calls?\b|\bincoming\b|\binbound\b/.test(name));
-  const mixedBatch = inboundDays.size > 0 && outboundDays.size > 0;
-  const onlyOutbound = outboundDays.size > 0 && inboundDays.size === 0;
-  const onlyInbound = inboundDays.size > 0 && outboundDays.size === 0;
-
-  if (fileDirection === "Outbound" || (outboundTruth && !inboundTruth)) {
-    hideUnmatched("Outbound", outboundDays);
-  } else if (fileDirection === "Inbound" || (inboundTruth && !outboundTruth)) {
-    hideUnmatched("Inbound", inboundDays);
-  } else {
-    if (mixedBatch || onlyInbound) hideUnmatched("Inbound", inboundDays);
-    if (mixedBatch || onlyOutbound) hideUnmatched("Outbound", outboundDays);
-  }
   return {
     filename,
     answered: answered.length,
@@ -966,10 +1347,15 @@ export function buildReconcilePreviewFromRows(
     agentFixes,
     unmappedAgents,
     matchedIds,
+    numberDiffs,
+    agentTotals,
+    unmatchedCrm,
+    optionalShrinks,
     detectedAgentId,
     detectedAgentName,
     detectedDirection: fileDirection,
-    extraIds,
+    extraIds: [],
+    shrinkIds: [],
   };
 }
 

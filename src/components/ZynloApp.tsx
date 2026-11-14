@@ -607,7 +607,9 @@ export function ZynloApp({ initial }: { initial: ZynloData }) {
 	}
 	async function applyReconcile() {
 		if (!reconcilePreview) return;
-		const fixes = reconcilePreview.directionFixes || [];
+		const shrinkIds = new Set(reconcilePreview.shrinkIds || []);
+		const shrinks = (reconcilePreview.optionalShrinks || []).filter((fix) => shrinkIds.has(fix.callId));
+		const fixes = [...(reconcilePreview.directionFixes || []), ...shrinks];
 		const agentFixes = reconcilePreview.agentFixes || [];
 		const extraIds = reconcilePreview.extraIds || [];
 		if (reconcilePreview.missing.length === 0 && fixes.length === 0 && extraIds.length === 0 && agentFixes.length === 0) {
@@ -732,20 +734,8 @@ export function ZynloApp({ initial }: { initial: ZynloData }) {
 				added += 1;
 			});
 			let hidden = 0;
-			const keep = new Set(used);
-			const dir = reconcilePreview.detectedDirection;
-			const outDays = new Set([...reconcilePreview.already, ...reconcilePreview.missing].filter((r) => r.type === "Outbound").map((r) => (r.datetime || "").slice(0, 10)).filter(Boolean));
-			const inDays = new Set([...reconcilePreview.already, ...reconcilePreview.missing].filter((r) => r.type === "Inbound").map((r) => (r.datetime || "").slice(0, 10)).filter(Boolean));
-			const recomputed = [];
-			for (const c of liveData.calls) {
-				if (c.csvCounted === false) continue;
-				if (keep.has(c.id)) continue;
-				if (c.outcome === "No Answer" || c.outcome === "Voicemail") continue;
-				const day = (c.datetime || "").slice(0, 10);
-				if ((!dir || dir === "Outbound") && c.type === "Outbound" && outDays.has(day)) recomputed.push(c.id);
-				if ((!dir || dir === "Inbound") && c.type === "Inbound" && inDays.has(day)) recomputed.push(c.id);
-			}
-			const hideIds = [...new Set([...extraIds, ...recomputed])];
+			const matched = new Set(reconcilePreview.matchedIds || []);
+			const hideIds = [...new Set(extraIds.filter((id) => id && !matched.has(id)))];
 			const stamp = [...new Set([...(reconcilePreview.matchedIds || []), ...hideIds])];
 			await runPool(stamp, 6, async (id) => {
 				const c = liveData.calls.find((x) => x.id === id) || live.calls.find((x) => x.id === id);
@@ -787,6 +777,24 @@ export function ZynloApp({ initial }: { initial: ZynloData }) {
 		} finally {
 			setBusy(false);
 		}
+	}
+	function toggleReconcileHide(callId) {
+		setReconcilePreview((prev) => {
+			if (!prev) return prev;
+			const current = new Set(prev.extraIds || []);
+			if (current.has(callId)) current.delete(callId);
+			else current.add(callId);
+			return { ...prev, extraIds: [...current] };
+		});
+	}
+	function toggleReconcileShrink(callId) {
+		setReconcilePreview((prev) => {
+			if (!prev) return prev;
+			const current = new Set(prev.shrinkIds || []);
+			if (current.has(callId)) current.delete(callId);
+			else current.add(callId);
+			return { ...prev, shrinkIds: [...current] };
+		});
 	}
 	async function patchCall(id, patch) {
 		const c = data.calls.find((x) => x.id === id);
@@ -4408,6 +4416,7 @@ export function ZynloApp({ initial }: { initial: ZynloData }) {
 					setReconcilePreview(null);
 				},
 				title: "Reconcile answered calls",
+				wide: true,
 				footer: /* @__PURE__ */ jsxs(Fragment, { children: [/* @__PURE__ */ jsx(Btn, {
 					variant: "secondary",
 					onClick: () => {
@@ -4417,15 +4426,15 @@ export function ZynloApp({ initial }: { initial: ZynloData }) {
 					children: "Close"
 				}), /* @__PURE__ */ jsx(Btn, {
 					onClick: () => void applyReconcile(),
-					disabled: busy || !reconcilePreview || reconcilePreview.missing.length === 0 && !(reconcilePreview.directionFixes || []).length && !(reconcilePreview.extraIds || []).length && !(reconcilePreview.agentFixes || []).length,
-					children: busy ? "Saving" : [reconcilePreview?.missing.length ? `Add ${reconcilePreview.missing.length}` : "", (reconcilePreview?.agentFixes || []).length ? `Tag ${(reconcilePreview?.agentFixes || []).length}` : "", (reconcilePreview?.directionFixes || []).length ? `Update ${(reconcilePreview?.directionFixes || []).length}` : "", (reconcilePreview?.extraIds || []).length ? `Hide ${(reconcilePreview.extraIds || []).length}` : ""].filter(Boolean).join(" · ") || "Apply"
+					disabled: busy || !reconcilePreview || reconcilePreview.missing.length === 0 && !(reconcilePreview.directionFixes || []).length && !(reconcilePreview.extraIds || []).length && !(reconcilePreview.agentFixes || []).length && !(reconcilePreview.shrinkIds || []).length,
+					children: busy ? "Saving" : [reconcilePreview?.missing.length ? `Add ${reconcilePreview.missing.length}` : "", (reconcilePreview?.agentFixes || []).length ? `Tag ${(reconcilePreview?.agentFixes || []).length}` : "", (reconcilePreview?.directionFixes || []).length ? `Update ${(reconcilePreview?.directionFixes || []).length}` : "", (reconcilePreview?.shrinkIds || []).length ? `Shorten ${(reconcilePreview.shrinkIds || []).length}` : "", (reconcilePreview?.extraIds || []).length ? `Hide ${(reconcilePreview.extraIds || []).length}` : ""].filter(Boolean).join(" · ") || "Apply"
 				})] }),
 				children: /* @__PURE__ */ jsxs("div", {
 					className: "space-y-4",
 					children: [
 						/* @__PURE__ */ jsx("p", {
 							className: "text-sm text-muted",
-							children: "Upload up to 10 Cloud Telecom CSVs. The file is the list that matters: every answered row is its own call, including repeat callers. A CRM entry only covers the one call closest to that time. Unanswered, busy, and missed rows are skipped. Oshadi on extension 11 is Praveena."
+							children: "Upload up to 10 Cloud Telecom CSVs. Every answered row is its own call, including repeat callers. Each one pairs with the closest logged call within 5 minutes. A different number still counts for the same agent, and a one-digit number within a minute counts even when the agent differs. Handle time changes only when the number matches, and a log of a minute or more is not cut under 10 seconds unless you tick it. Logged calls that do not match stay visible until you tick them. Oshadi on extension 11 is Praveena."
 						}),
 						/* @__PURE__ */ jsxs("label", {
 							className: "flex min-h-11 cursor-pointer flex-col items-center justify-center rounded-xl border-2 border-dashed border-primary/40 bg-purple-50 px-4 py-6 text-center",
@@ -4500,6 +4509,50 @@ export function ZynloApp({ initial }: { initial: ZynloData }) {
 										})
 									]
 								}),
+								(reconcilePreview.agentTotals || []).length ? /* @__PURE__ */ jsxs("div", {
+									className: "rounded-xl border border-border",
+									children: [/* @__PURE__ */ jsx("div", {
+										className: "border-b border-border px-3 py-2 text-xs font-semibold uppercase tracking-wide text-muted",
+										children: "By agent"
+									}), (reconcilePreview.agentTotals || []).map((row) => /* @__PURE__ */ jsxs("div", {
+										className: "border-b border-border px-3 py-2 last:border-b-0",
+										children: [/* @__PURE__ */ jsx("div", {
+											className: "text-sm font-semibold",
+											children: row.agentName
+										}), /* @__PURE__ */ jsxs("div", {
+											className: "text-xs text-muted",
+											children: [
+												row.phoneSystem,
+												" on the phone system · ",
+												row.logged,
+												" logged · ",
+												row.missing,
+												" missing"
+											]
+										})]
+									}, row.agentId || row.agentName)), (reconcilePreview.numberDiffs || []).length ? /* @__PURE__ */ jsx("div", {
+										className: "px-3 py-2 text-xs text-muted",
+										children: "Logged includes a call whose number differs. Missing is a phone-system call that still has no log."
+									}) : null]
+								}) : null,
+								/* @__PURE__ */ jsxs("div", {
+									className: "text-xs text-muted",
+									children: [
+										reconcilePreview.filename,
+										". ",
+										reconcilePreview.answered,
+										" answered calls in the phone system. ",
+										reconcilePreview.already.length,
+										" already logged. ",
+										reconcilePreview.missing.length,
+										" missing.",
+										(reconcilePreview.numberDiffs || []).length ? ` ${(reconcilePreview.numberDiffs || []).length} matched, number differs.` : "",
+										reconcilePreview.skipped ? ` ${reconcilePreview.skipped} skipped.` : "",
+										(reconcilePreview.unmatchedCrm || []).length ? ` ${(reconcilePreview.unmatchedCrm || []).length} logged calls did not match. Tick one to hide it.` : "",
+										(reconcilePreview.extraIds || []).length ? ` ${(reconcilePreview.extraIds || []).length} ticked to hide.` : "",
+										reconcilePreview.detectedDirection ? ` ${reconcilePreview.detectedDirection}.` : ""
+									]
+								}),
 								(reconcilePreview.directionFixes || []).length ? /* @__PURE__ */ jsxs("div", {
 									className: "rounded-lg border border-primary/30 bg-purple-50 px-3 py-2 text-sm",
 									children: [
@@ -4518,32 +4571,71 @@ export function ZynloApp({ initial }: { initial: ZynloData }) {
 										})
 									]
 								}) : null,
-								/* @__PURE__ */ jsxs("div", {
-									className: "text-xs text-muted",
-									children: [
-										reconcilePreview.filename,
-										". ",
-										reconcilePreview.answered,
-										" answered calls in this file. ",
-										reconcilePreview.already.length,
-										" already in the log. ",
-										reconcilePreview.missing.length,
-										" missing.",
-										reconcilePreview.skipped ? ` ${reconcilePreview.skipped} skipped.` : "",
-										(reconcilePreview.extraIds || []).length ? ` ${(reconcilePreview.extraIds || []).length} extra in the log will be hidden.` : "",
-										reconcilePreview.detectedDirection ? ` ${reconcilePreview.detectedDirection}.` : ""
-									]
-								}),
+								(reconcilePreview.optionalShrinks || []).length ? /* @__PURE__ */ jsxs("div", {
+									className: "rounded-xl border border-border",
+									children: [/* @__PURE__ */ jsx("div", {
+										className: "border-b border-border px-3 py-2 text-xs font-semibold uppercase tracking-wide text-muted",
+										children: "Shorten only if you tick"
+									}), /* @__PURE__ */ jsx("p", {
+										className: "px-3 py-2 text-xs text-muted",
+										children: "The number matches, but the phone system is under 10 seconds and the log is 1 minute or more. The log keeps its time unless you tick it."
+									}), /* @__PURE__ */ jsx("div", {
+										className: "max-h-40 overflow-y-auto overscroll-contain",
+										children: (reconcilePreview.optionalShrinks || []).map((row) => /* @__PURE__ */ jsxs("label", {
+											className: "flex min-h-11 cursor-pointer items-start gap-3 border-t border-border px-3 py-2",
+											children: [/* @__PURE__ */ jsx("input", {
+												type: "checkbox",
+												className: "mt-1 h-4 w-4 shrink-0 accent-primary",
+												checked: (reconcilePreview.shrinkIds || []).includes(row.callId),
+												onChange: () => toggleReconcileShrink(row.callId)
+											}), /* @__PURE__ */ jsxs("span", { children: [/* @__PURE__ */ jsx("span", {
+												className: "block text-sm font-semibold",
+												children: row.phone
+											}), /* @__PURE__ */ jsxs("span", {
+												className: "block text-xs text-muted",
+												children: [
+													formatDate(row.datetime),
+													" · ",
+													row.fromDuration.toFixed(1),
+													" → ",
+													row.toDuration.toFixed(1),
+													" min"
+												]
+											})] })]
+										}, row.callId))
+									})]
+								}) : null,
+								(reconcilePreview.numberDiffs || []).length ? /* @__PURE__ */ jsxs("div", {
+									className: "rounded-xl border border-border",
+									children: [/* @__PURE__ */ jsx("div", {
+										className: "border-b border-border px-3 py-2 text-xs font-semibold uppercase tracking-wide text-muted",
+										children: `Matched, number differs · ${(reconcilePreview.numberDiffs || []).length}`
+									}), /* @__PURE__ */ jsx("div", {
+										className: "max-h-48 overflow-y-auto overscroll-contain",
+										children: (reconcilePreview.numberDiffs || []).map((row) => /* @__PURE__ */ jsxs("div", {
+											className: "border-b border-border px-3 py-2 text-sm last:border-b-0",
+											children: [/* @__PURE__ */ jsxs("div", {
+												className: "font-semibold",
+												children: [row.crmPhone, " in the log · ", row.csvPhone, " on the phone system"]
+											}), /* @__PURE__ */ jsxs("div", {
+												className: "text-xs text-muted",
+												children: [
+													row.kind === "agent-differs" ? `Agent differs${row.crmAgentName ? ` · ${row.crmAgentName} in the log` : ""}` : row.kind === "one-digit" ? "One digit off" : "Other number",
+													" · ",
+													formatDate(row.datetime),
+													row.agentName ? ` · ${row.agentName}` : ""
+												]
+											})]
+										}, row.callId))
+									})]
+								}) : null,
 								(reconcilePreview.unmappedAgents || []).length ? /* @__PURE__ */ jsx("div", {
 									className: "rounded-lg border border-primary/30 bg-purple-50 px-3 py-2 text-sm",
-									children: `Not on anyone's totals: ${(reconcilePreview.unmappedAgents || []).map((agent) => `${agent.label} (${agent.count})`).join(", ")}. Their calls are still listed.`
+									children: `Not a CRM user: ${(reconcilePreview.unmappedAgents || []).map((agent) => `${agent.label} (${agent.count})`).join(", ")}. Their calls are listed under that name in By agent.`
 								}) : null,
-								reconcilePreview.missing.length === 0 && !(reconcilePreview.directionFixes || []).length && !(reconcilePreview.extraIds || []).length && !(reconcilePreview.agentFixes || []).length ? /* @__PURE__ */ jsx("div", {
+								reconcilePreview.missing.length === 0 ? /* @__PURE__ */ jsx("div", {
 									className: "text-sm text-muted",
-									children: "Every answered call in this file is already in the log."
-								}) : reconcilePreview.missing.length === 0 ? /* @__PURE__ */ jsx("div", {
-									className: "text-sm text-muted",
-									children: (reconcilePreview.extraIds || []).length ? "No new rows. Extra calls on those days will be hidden." : "No new rows. Handle time on existing calls will be updated."
+									children: (reconcilePreview.directionFixes || []).length || (reconcilePreview.agentFixes || []).length ? "No new rows. Handle time or the agent on existing calls will be updated." : "Every answered call in these files is already in the log."
 								}) : /* @__PURE__ */ jsx("div", {
 									className: "grid grid-cols-1 gap-3 sm:grid-cols-2",
 									children: [["Inbound", reconcilePreview.missingInbound], ["Outbound", reconcilePreview.missingOutbound]].map(([label, list]) => /* @__PURE__ */ jsxs("div", {
@@ -4577,7 +4669,40 @@ export function ZynloApp({ initial }: { initial: ZynloData }) {
 											}, row.phone + row.datetime + row.type))
 										})]
 									}, label))
-								})
+								}),
+								(reconcilePreview.unmatchedCrm || []).length ? /* @__PURE__ */ jsxs("div", {
+									className: "rounded-xl border border-border",
+									children: [/* @__PURE__ */ jsxs("div", {
+										className: "border-b border-border px-3 py-2 text-xs font-semibold uppercase tracking-wide text-muted",
+										children: ["Logged calls to review · ", (reconcilePreview.unmatchedCrm || []).length]
+									}), /* @__PURE__ */ jsx("p", {
+										className: "px-3 py-2 text-xs text-muted",
+										children: "These did not match a phone-system call. They stay in the log unless you tick one."
+									}), /* @__PURE__ */ jsx("div", {
+										className: "max-h-56 overflow-y-auto overscroll-contain",
+										children: (reconcilePreview.unmatchedCrm || []).map((row) => /* @__PURE__ */ jsxs("label", {
+											className: "flex min-h-11 cursor-pointer items-start gap-3 border-t border-border px-3 py-2",
+											children: [/* @__PURE__ */ jsx("input", {
+												type: "checkbox",
+												className: "mt-1 h-4 w-4 shrink-0 accent-primary",
+												checked: (reconcilePreview.extraIds || []).includes(row.callId),
+												onChange: () => toggleReconcileHide(row.callId)
+											}), /* @__PURE__ */ jsxs("span", { children: [/* @__PURE__ */ jsx("span", {
+												className: "block text-sm font-semibold",
+												children: row.phone || "No number"
+											}), /* @__PURE__ */ jsxs("span", {
+												className: "block text-xs text-muted",
+												children: [
+													row.duplicate ? "Duplicate · " : "",
+													formatDate(row.datetime),
+													" · ",
+													row.type,
+													row.agentName ? ` · ${row.agentName}` : ""
+												]
+											})] })]
+										}, row.callId))
+									})]
+								}) : null
 							]
 						}) : null
 					]
