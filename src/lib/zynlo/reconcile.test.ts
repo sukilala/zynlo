@@ -79,13 +79,13 @@ function queueCsv(lines: string[]): string {
 
 const queue = [
   "Date,Queue,Caller,Position,Disconnection,Wait,Extension,Agent,Duration",
-  "2026-11-14 09:04:31,1000 - Sinhala,0704520117,1,Caller,00:00:06,11,Oshadi,00:00:30",
-  "2026-11-14 09:06:31,1000 - Sinhala,0704520117,1,Agent,00:00:03,11,Oshadi,00:01:44",
-  "2026-11-14 11:04:31,1000 - Sinhala,0704520117,1,Agent,00:00:04,11,Oshadi,00:02:00",
-  "2026-11-14 09:16:16,1000 - Sinhala,0764210086,1,Agent,00:00:11,10,Harshika,00:02:04",
-  "2026-11-14 14:35:24,1000 - Sinhala,0761277897,1,Agent,00:00:42,10,Harshika,00:00:01",
-  "2026-11-14 14:36:00,1000 - Sinhala,0761277897,1,Agent,00:00:02,10,Harshika,00:00:01",
-  "2026-11-14 10:08:23,1001 - Tamil,+94755187784,1,Agent,00:00:04,12,Kamal,00:01:27",
+  "2026-11-14 09:04:31,1000 - Sinhala,0701000001,1,Caller,00:00:06,11,Oshadi,00:00:30",
+  "2026-11-14 09:06:31,1000 - Sinhala,0701000001,1,Agent,00:00:03,11,Oshadi,00:01:44",
+  "2026-11-14 11:04:31,1000 - Sinhala,0701000001,1,Agent,00:00:04,11,Oshadi,00:02:00",
+  "2026-11-14 09:16:16,1000 - Sinhala,0701000002,1,Agent,00:00:11,10,Harshika,00:02:04",
+  "2026-11-14 14:35:24,1000 - Sinhala,0701000003,1,Agent,00:00:42,10,Harshika,00:00:01",
+  "2026-11-14 14:36:00,1000 - Sinhala,0701000003,1,Agent,00:00:02,10,Harshika,00:00:01",
+  "2026-11-14 10:08:23,1001 - Tamil,+94701000004,1,Agent,00:00:04,12,Kamal,00:01:27",
 ].join("\n");
 
 test("each answered CSV row stays its own call, including repeats and one-second calls", () => {
@@ -95,12 +95,12 @@ test("each answered CSV row stays its own call, including repeats and one-second
   const preview = buildReconcilePreviewFromRows("queue.csv", rows, book([], []), agents, "Inbound", true);
   assert.equal(preview.answered, 7);
   assert.equal(preview.missing.length, 7);
-  assert.equal(preview.missing.filter((row) => row.phone.endsWith("761277897")).length, 2);
+  assert.equal(preview.missing.filter((row) => row.phone.endsWith("701000003")).length, 2);
   assert.equal(preview.missing.filter((row) => row.durationRaw === "00:00:01").length, 2);
-  const oshadi = preview.missing.filter((row) => row.phone.endsWith("704520117"));
+  const oshadi = preview.missing.filter((row) => row.phone.endsWith("701000001"));
   assert.equal(oshadi.length, 3);
   assert.ok(oshadi.every((row) => row.agentId === "pra" && row.agentHint === "Praveena"));
-  assert.equal(preview.missing.find((row) => row.phone.endsWith("764210086"))?.agentId, "har");
+  assert.equal(preview.missing.find((row) => row.phone.endsWith("701000002"))?.agentId, "har");
   assert.equal(preview.missing.find((row) => row.pbxName === "Kamal")?.agentId, "");
   assert.equal(preview.unmappedAgents.length, 1);
   assert.match(preview.unmappedAgents[0]?.label || "", /Kamal/);
@@ -115,23 +115,23 @@ test("each answered CSV row stays its own call, including repeats and one-second
 test("one CRM call covers one CSV call, not every repeat from that number", () => {
   const rows = parseTelecomCsv(queue, null);
   const data = book(
-    [customer("c1", "0704520117")],
+    [customer("c1", "0701000001")],
     [call("logged", "c1", "2026-11-14T09:04:00")],
   );
   const preview = buildReconcilePreviewFromRows("queue.csv", rows, data, agents, "Inbound", true);
   const sameNumber = [...preview.already, ...preview.missing].filter((row) =>
-    row.phone.endsWith("704520117"),
+    row.phone.endsWith("701000001"),
   );
   assert.equal(sameNumber.length, 3);
-  assert.equal(preview.already.filter((row) => row.phone.endsWith("704520117")).length, 1);
-  assert.equal(preview.missing.filter((row) => row.phone.endsWith("704520117")).length, 2);
+  assert.equal(preview.already.filter((row) => row.phone.endsWith("701000001")).length, 1);
+  assert.equal(preview.missing.filter((row) => row.phone.endsWith("701000001")).length, 2);
   assert.equal(preview.matchedIds.length, 1);
 });
 
 test("a blank CRM agent on Oshadi's call is tagged to Praveena", () => {
   const rows = parseTelecomCsv(queue, null).filter((row) => row.pbxName === "Oshadi").slice(0, 1);
   const data = book(
-    [customer("c1", "+94704520117")],
+    [customer("c1", "+94701000001")],
     [call("logged", "c1", "2026-11-14T09:04:31", "Inbound", "")],
   );
   const preview = buildReconcilePreviewFromRows("queue.csv", rows, data, agents, "Inbound", true);
@@ -144,15 +144,15 @@ test("a blank CRM agent on Oshadi's call is tagged to Praveena", () => {
 test("outbound CDRs without outgoing in the file name are still counted", () => {
   const text = [
     "Date,Destination,Disposition,Duration,Wait time,Trunk,Extension,accountcode",
-    "2026-11-14 10:55:40,724454646,ANSWERED,00:01:40,00:00:27,6,10,",
-    "2026-11-14 13:06:24,0787418432,ANSWERED,00:00:33,00:00:07,6,11,",
-    "2026-11-14 13:07:40,+94787418432,ANSWERED,00:00:31,00:00:07,6,11,",
-    "2026-11-14 13:27:39,0786648171,NO ANSWER,00:00:00,00:00:07,6,10,",
+    "2026-11-14 10:55:40,701000005,ANSWERED,00:01:40,00:00:27,6,10,",
+    "2026-11-14 13:06:24,0701000006,ANSWERED,00:00:33,00:00:07,6,11,",
+    "2026-11-14 13:07:40,+94701000006,ANSWERED,00:00:31,00:00:07,6,11,",
+    "2026-11-14 13:27:39,0701000007,NO ANSWER,00:00:00,00:00:07,6,10,",
   ].join("\n");
   const rows = parseTelecomCsv(text, null);
   assert.equal(rows.length, 4);
   assert.ok(rows.every((row) => row.type === "Outbound"));
-  assert.equal(rows[0]?.phone, "0724454646");
+  assert.equal(rows[0]?.phone, "0701000005");
   assert.equal(rows[0]?.agentId, "");
   const preview = buildReconcilePreviewFromRows("ext.csv", rows, book([], []), agents, "Outbound", false);
   assert.equal(preview.answered, 3);
@@ -160,7 +160,7 @@ test("outbound CDRs without outgoing in the file name are still counted", () => 
   assert.equal(preview.missing.filter((row) => row.agentId === "har").length, 1);
   assert.equal(preview.missing.filter((row) => row.agentId === "pra").length, 2);
   const data = book(
-    [customer("c1", "0724454646"), customer("c2", "0787418432")],
+    [customer("c1", "0701000005"), customer("c2", "0701000006")],
     [call("out1", "c1", "2026-11-14T10:55:40", "Outbound", "har")],
   );
   const again = buildReconcilePreviewFromRows("ext.csv", rows, data, agents, "Outbound", false);
@@ -172,8 +172,8 @@ test("a file exported by Harshika still follows each row's extension", () => {
   const text = [
     "Generated by Harshika",
     "Date,Destination,Disposition,Duration,Wait time,Trunk,Extension,accountcode",
-    "2026-11-14 13:06:24,0787418432,ANSWERED,00:00:33,00:00:07,6,11,",
-    "2026-11-14 10:55:40,0724454646,ANSWERED,00:01:40,00:00:27,6,10,",
+    "2026-11-14 13:06:24,0701000006,ANSWERED,00:00:33,00:00:07,6,11,",
+    "2026-11-14 10:55:40,0701000005,ANSWERED,00:01:40,00:00:27,6,10,",
   ].join("\n");
   const rows = parseTelecomCsv(text, null);
   assert.equal(rows[0]?.pbxName, "");
