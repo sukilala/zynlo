@@ -897,6 +897,13 @@ type CrmCand = {
   agentId: string;
 };
 
+/** Hidden, no-answer, and voicemail logs are not a cover for an answered phone-system call. */
+function logCanCover(call: Call): boolean {
+  if (call.csvCounted === false) return false;
+  if (call.outcome === "No Answer" || call.outcome === "Voicemail") return false;
+  return true;
+}
+
 function crmCandidates(data: ZynloData): CrmCand[] {
   const customersById: Record<string, Customer> = {};
   for (const customer of data.customers) customersById[customer.id] = customer;
@@ -1136,7 +1143,8 @@ export function buildReconcilePreviewFromRows(
     if (!matchByRow.has(i)) leftRows.push(i);
   }
   for (let j = 0; j < cands.length; j++) {
-    if (!used.has(cands[j].call.id)) leftCands.push(j);
+    if (used.has(cands[j].call.id) || !logCanCover(cands[j].call)) continue;
+    leftCands.push(j);
   }
   const pass2: { left: number; right: number; cost: number; kind: MatchKind }[] = [];
   for (let a = 0; a < leftRows.length; a++) {

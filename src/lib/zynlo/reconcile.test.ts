@@ -414,6 +414,27 @@ test("exact-number duration updates do not shrink a minute-long log under 10 sec
   assert.equal(keep.directionFixes[0]?.toDuration, 1.5);
 });
 
+test("a no-answer, voicemail, or hidden log does not cover a different number", () => {
+  const line = "2026-11-14 10:15:00,1000 - Sinhala,0701001414,1,Agent,00:00:04,10,Harshika,00:02:00";
+  for (const [id, outcome, counted] of [
+    ["na", "No Answer", true],
+    ["vm", "Voicemail", true],
+    ["hid", "Resolved", false],
+  ] as const) {
+    const preview = oneQueue(
+      line,
+      book(
+        [customer("c1", "0701001515")],
+        [call(id, "c1", "2026-11-14T10:15:00", "Inbound", "har", 2, outcome, counted)],
+      ),
+    );
+    assert.equal(preview.missing.length, 1, id);
+    assert.equal(preview.numberDiffs.length, 0, id);
+    assert.equal(preview.already.length, 0, id);
+    assert.equal(preview.unmatchedCrm.some((row) => row.callId === id), false, id);
+  }
+});
+
 test("a second log of the same number in the same minute is marked duplicate", () => {
   const rows = parseTelecomCsv(
     queueCsv([
