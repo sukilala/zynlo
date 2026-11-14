@@ -36,7 +36,7 @@ function extensionKey(value: string): string {
   return trimmed || "0";
 }
 
-/** Name wins over extension when both are present and they disagree. */
+/** The row's own agent name wins over its extension. A file-level export name is not a row agent. */
 export function pbxLinkFor(name: string, extension: string): PbxAgentLink | null {
   const wanted = clean(name);
   if (wanted) {

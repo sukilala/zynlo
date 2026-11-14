@@ -608,7 +608,7 @@ export function parseTelecomCsv(
       const extra = clocks.find((c) => !dateRaw.includes(c));
       if (extra) dur = parseDurationCell(extra);
     }
-    const agentHint = (iAgent >= 0 ? cells[iAgent] : "") || generatedBy;
+    const rowAgent = (iAgent >= 0 ? cells[iAgent] || "" : "").trim();
     const uid = (iUid >= 0 ? cells[iUid] || "" : "").trim()
       || `${datetime}|${phone}|${type}|${dur.raw}`;
     rows.push({
@@ -619,8 +619,8 @@ export function parseTelecomCsv(
       durationMin: dur.min,
       durationRaw: dur.raw,
       disposition,
-      agentHint: agentHint.trim(),
-      pbxName: agentHint.trim(),
+      agentHint: rowAgent || generatedBy.trim(),
+      pbxName: rowAgent,
       agentId: "",
       extension: iExt >= 0 ? (cells[iExt] || "").replace(/\D/g, "") : "",
       unmappedAgent: "",
