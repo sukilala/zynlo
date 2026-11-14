@@ -3,6 +3,7 @@ import { test } from "node:test";
 import { exportPKCS8, generateKeyPair, importPKCS8, SignJWT } from "jose";
 import { countsInCallLog } from "./utils.ts";
 import {
+  compareFirebaseKey,
   mapCall,
   orderedRows,
   pageCountFor,
@@ -52,6 +53,47 @@ test("cursor is dropped when Firebase repeats it, and a deleted cursor is kept",
     ["c"],
   );
   assert.equal(last.nextCursor, null);
+});
+
+test("unordered firebase pages do not skip records between cursors", () => {
+  const keys: string[] = [];
+  for (let i = 0; i < 80; i++) keys.push(String(i));
+  for (let i = 0; i < 40; i++) keys.push(`uuid-${String(i).padStart(3, "0")}`);
+  keys.sort(compareFirebaseKey);
+  const limit = 10;
+  function windowKeys(cursor: string | null): string[] {
+    const count = cursor ? limit + 2 : limit + 1;
+    let start = 0;
+    if (cursor) {
+      start = keys.findIndex((key) => compareFirebaseKey(key, cursor) >= 0);
+      if (start < 0) start = keys.length;
+    }
+    return keys.slice(start, start + count);
+  }
+  function shuffle(list: string[]): string[] {
+    const arr = list.slice();
+    let seed = 3;
+    for (let i = arr.length - 1; i > 0; i--) {
+      seed = (seed * 1103515245 + 12345) & 0x7fffffff;
+      const j = seed % (i + 1);
+      [arr[i], arr[j]] = [arr[j], arr[i]];
+    }
+    return arr;
+  }
+  const seen = new Set<string>();
+  let cursor: string | null = null;
+  for (let page = 0; page < 40; page++) {
+    const slice = windowKeys(cursor);
+    const body = `{${shuffle(slice)
+      .map((key) => `${JSON.stringify(key)}:${JSON.stringify({ id: key, name: key })}`)
+      .join(",")}}`;
+    const parsed = pageFromRaw("customers", JSON.parse(body), cursor, limit);
+    if (parsed.collection !== "customers") break;
+    for (const item of parsed.items) seen.add(item.id);
+    if (!parsed.nextCursor || parsed.nextCursor === cursor || parsed.items.length === 0) break;
+    cursor = parsed.nextCursor;
+  }
+  assert.equal(seen.size, keys.length);
 });
 
 test("agent pages never include the password hash", () => {

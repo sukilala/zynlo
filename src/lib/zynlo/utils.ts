@@ -104,6 +104,20 @@ export function phoneDigits(phone: string | undefined | null): string {
   return (phone || "").replace(/\D/g, "");
 }
 
+/**
+ * One Sri Lankan number, whatever the PBX printed.
+ * 724454646, 0724454646, +94724454646 and 0094724454646 are the same phone.
+ */
+export function canonicalPhone(phone: string | undefined | null): string {
+  let digits = phoneDigits(phone);
+  if (digits.startsWith("0094")) digits = digits.slice(4);
+  else if (digits.startsWith("94") && (digits.length === 11 || digits.length === 12)) {
+    digits = digits.slice(2);
+  }
+  if (digits.length === 9) digits = `0${digits}`;
+  return digits;
+}
+
 /** Telecom reconcile rows must not move resolution rate. */
 export function countsForResolution(c: {
   outcome?: string;
@@ -252,14 +266,14 @@ export function findCustomerByPhone(
   customers: Customer[],
   phone: string,
 ): Customer | undefined {
-  const digits = phoneDigits(phone);
+  const digits = canonicalPhone(phone);
   if (digits.length < 8) return undefined;
-  const exact = customers.find((c) => phoneDigits(c.phone) === digits);
+  const exact = customers.find((c) => canonicalPhone(c.phone) === digits);
   if (exact) return exact;
   const want = digits.length >= 9 ? digits.slice(-9) : digits;
   if (want.length < 8) return undefined;
   return customers.find((c) => {
-    const d = phoneDigits(c.phone);
+    const d = canonicalPhone(c.phone);
     if (d.length < 8) return false;
     const got = d.length >= 9 ? d.slice(-9) : d;
     return got === want;

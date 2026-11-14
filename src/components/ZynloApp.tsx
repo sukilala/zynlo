@@ -608,8 +608,9 @@ export function ZynloApp({ initial }: { initial: ZynloData }) {
 	async function applyReconcile() {
 		if (!reconcilePreview) return;
 		const fixes = reconcilePreview.directionFixes || [];
+		const agentFixes = reconcilePreview.agentFixes || [];
 		const extraIds = reconcilePreview.extraIds || [];
-		if (reconcilePreview.missing.length === 0 && fixes.length === 0 && extraIds.length === 0) {
+		if (reconcilePreview.missing.length === 0 && fixes.length === 0 && extraIds.length === 0 && agentFixes.length === 0) {
 			toast("Nothing to apply");
 			return;
 		}
@@ -617,15 +618,20 @@ export function ZynloApp({ initial }: { initial: ZynloData }) {
 		try {
 			const live = await loadFresh();
 			let flipped = 0;
+			let tagged = 0;
+			const agentByCall = new Map(agentFixes.map((fix) => [fix.callId, fix]));
 			await runPool(fixes, 6, async (fix) => {
 				const c = live.calls.find((x) => x.id === fix.callId);
 				if (!c) return;
 				const nextDur = fix.toDuration > 0 ? fix.toDuration : c.duration;
-				if (Math.abs((Number(c.duration) || 0) - nextDur) < 0.05) return;
+				const nextAgent = agentByCall.get(c.id)?.toAgentId || c.agentId;
+				const durSame = Math.abs((Number(c.duration) || 0) - nextDur) < 0.05;
+				const agentSame = (nextAgent || "") === (c.agentId || "");
+				if (durSame && agentSame) return;
 				await saveCall({ data: {
 					id: c.id,
 					datetime: c.datetime,
-					agentId: c.agentId,
+					agentId: nextAgent,
 					customerId: c.customerId,
 					clientId: c.clientId,
 					type: c.type,
@@ -638,7 +644,30 @@ export function ZynloApp({ initial }: { initial: ZynloData }) {
 					source: c.source === "telecom" ? "telecom" : "manual",
 					csvCounted: c.csvCounted
 				} });
-				flipped += 1;
+				if (!durSame) flipped += 1;
+				if (!agentSame) tagged += 1;
+			});
+			const durationIds = new Set(fixes.map((fix) => fix.callId));
+			await runPool(agentFixes.filter((fix) => !durationIds.has(fix.callId)), 6, async (fix) => {
+				const c = live.calls.find((x) => x.id === fix.callId);
+				if (!c || (c.agentId || "") === fix.toAgentId) return;
+				await saveCall({ data: {
+					id: c.id,
+					datetime: c.datetime,
+					agentId: fix.toAgentId,
+					customerId: c.customerId,
+					clientId: c.clientId,
+					type: c.type,
+					duration: c.duration,
+					outcome: c.outcome,
+					rating: c.rating,
+					ratingScale: c.ratingScale,
+					notes: c.notes,
+					followUpAt: c.followUpAt,
+					source: c.source === "telecom" ? "telecom" : "manual",
+					csvCounted: c.csvCounted
+				} });
+				tagged += 1;
 			});
 			let customers = (live.customers || []).slice();
 			const liveData = {
@@ -724,14 +753,16 @@ export function ZynloApp({ initial }: { initial: ZynloData }) {
 				const hide = hideIds.includes(id);
 				if (!hide && c.csvCounted === true) return;
 				if (hide && c.csvCounted === false) return;
+				const agentFix = agentByCall.get(c.id);
+				const durFix = fixes.find((fix) => fix.callId === c.id);
 				await saveCall({ data: {
 					id: c.id,
 					datetime: c.datetime,
-					agentId: c.agentId,
+					agentId: agentFix?.toAgentId || c.agentId,
 					customerId: c.customerId,
 					clientId: c.clientId,
 					type: c.type,
-					duration: c.duration,
+					duration: durFix && durFix.toDuration > 0 ? durFix.toDuration : c.duration,
 					outcome: c.outcome,
 					rating: c.rating,
 					ratingScale: c.ratingScale,
@@ -748,6 +779,7 @@ export function ZynloApp({ initial }: { initial: ZynloData }) {
 			const bits = [];
 			if (added) bits.push(`${added} added`);
 			if (flipped) bits.push(`${flipped} updated`);
+			if (tagged) bits.push(`${tagged} tagged`);
 			if (hidden) bits.push(`${hidden} extra hidden`);
 			toast(bits.join(" · ") || "Nothing to apply");
 		} catch (err) {
@@ -4385,15 +4417,15 @@ export function ZynloApp({ initial }: { initial: ZynloData }) {
 					children: "Close"
 				}), /* @__PURE__ */ jsx(Btn, {
 					onClick: () => void applyReconcile(),
-					disabled: busy || !reconcilePreview || reconcilePreview.missing.length === 0 && !(reconcilePreview.directionFixes || []).length && !(reconcilePreview.extraIds || []).length,
-					children: busy ? "Saving" : [reconcilePreview?.missing.length ? `Add ${reconcilePreview.missing.length}` : "", (reconcilePreview?.directionFixes || []).length ? `Update ${(reconcilePreview?.directionFixes || []).length}` : "", (reconcilePreview?.extraIds || []).length ? `Hide ${(reconcilePreview.extraIds || []).length}` : ""].filter(Boolean).join(" · ") || "Apply"
+					disabled: busy || !reconcilePreview || reconcilePreview.missing.length === 0 && !(reconcilePreview.directionFixes || []).length && !(reconcilePreview.extraIds || []).length && !(reconcilePreview.agentFixes || []).length,
+					children: busy ? "Saving" : [reconcilePreview?.missing.length ? `Add ${reconcilePreview.missing.length}` : "", (reconcilePreview?.agentFixes || []).length ? `Tag ${(reconcilePreview?.agentFixes || []).length}` : "", (reconcilePreview?.directionFixes || []).length ? `Update ${(reconcilePreview?.directionFixes || []).length}` : "", (reconcilePreview?.extraIds || []).length ? `Hide ${(reconcilePreview.extraIds || []).length}` : ""].filter(Boolean).join(" · ") || "Apply"
 				})] }),
 				children: /* @__PURE__ */ jsxs("div", {
 					className: "space-y-4",
 					children: [
 						/* @__PURE__ */ jsx("p", {
 							className: "text-sm text-muted",
-							children: "Upload up to 10 Cloud Telecom CSVs. Incoming files cap inbound. Outgoing files cap outbound. Only answered calls count. Unanswered, busy, and missed are skipped. Log totals for those days match the CSV. QA, notes, and direction on existing calls are not overwritten."
+							children: "Upload up to 10 Cloud Telecom CSVs. The file is the list that matters: every answered row is its own call, including repeat callers. A CRM entry only covers the one call closest to that time. Unanswered, busy, and missed rows are skipped. Oshadi on extension 11 is Praveena."
 						}),
 						/* @__PURE__ */ jsxs("label", {
 							className: "flex min-h-11 cursor-pointer flex-col items-center justify-center rounded-xl border-2 border-dashed border-primary/40 bg-purple-50 px-4 py-6 text-center",
@@ -4490,17 +4522,23 @@ export function ZynloApp({ initial }: { initial: ZynloData }) {
 									className: "text-xs text-muted",
 									children: [
 										reconcilePreview.filename,
-										" · ",
+										". ",
 										reconcilePreview.answered,
-										" ",
-										"answered · ",
-										reconcilePreview.skipped,
-										" skipped",
-										(reconcilePreview.extraIds || []).length ? ` · ${(reconcilePreview.extraIds || []).length} extra will be hidden` : "",
-										reconcilePreview.detectedDirection ? ` · ${reconcilePreview.detectedDirection.toLowerCase()}` : ""
+										" answered calls in this file. ",
+										reconcilePreview.already.length,
+										" already in the log. ",
+										reconcilePreview.missing.length,
+										" missing.",
+										reconcilePreview.skipped ? ` ${reconcilePreview.skipped} skipped.` : "",
+										(reconcilePreview.extraIds || []).length ? ` ${(reconcilePreview.extraIds || []).length} extra in the log will be hidden.` : "",
+										reconcilePreview.detectedDirection ? ` ${reconcilePreview.detectedDirection}.` : ""
 									]
 								}),
-								reconcilePreview.missing.length === 0 && !(reconcilePreview.directionFixes || []).length && !(reconcilePreview.extraIds || []).length ? /* @__PURE__ */ jsx("div", {
+								(reconcilePreview.unmappedAgents || []).length ? /* @__PURE__ */ jsx("div", {
+									className: "rounded-lg border border-primary/30 bg-purple-50 px-3 py-2 text-sm",
+									children: `Not on anyone's totals: ${(reconcilePreview.unmappedAgents || []).map((agent) => `${agent.label} (${agent.count})`).join(", ")}. Their calls are still listed.`
+								}) : null,
+								reconcilePreview.missing.length === 0 && !(reconcilePreview.directionFixes || []).length && !(reconcilePreview.extraIds || []).length && !(reconcilePreview.agentFixes || []).length ? /* @__PURE__ */ jsx("div", {
 									className: "text-sm text-muted",
 									children: "Every answered call in this file is already in the log."
 								}) : reconcilePreview.missing.length === 0 ? /* @__PURE__ */ jsx("div", {
